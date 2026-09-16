@@ -170,6 +170,67 @@ def calculate_team_tendency_fit(
     return min(max(total / weight if weight else 0.0, 0.0), 100.0)
 
 
+MEETING_IMPORTANCE = {
+    "informal": 20.0,
+    "formal": 50.0,
+    "dinner": 80.0,
+    "pro_day": 50.0,
+    "facility_invite": 80.0,
+}
+
+
+def calculate_meeting_fit_score(meetings: Iterable[Mapping[str, object]]) -> float:
+    """Return a capped 0-100 relationship score from prospect meetings.
+
+    The strongest meeting receives full weight; later meetings add diminishing
+    evidence so repeated contact matters without overwhelming player evaluation.
+    """
+    scores = sorted(
+        (
+            float(meeting.get("importance_score", MEETING_IMPORTANCE.get(str(meeting.get("meeting_type", "")), 0)))
+            for meeting in meetings
+            if meeting.get("is_active", True)
+        ),
+        reverse=True,
+    )
+    if not scores:
+        return 0.0
+    multipliers = (1.0, 0.35, 0.15)
+    return min(max(sum(score * multipliers[min(index, 2)] for index, score in enumerate(scores)), 0.0), 100.0)
+
+
+def calculate_external_mock_consensus(
+    picks: Iterable[Mapping[str, object]],
+    team_id: str,
+    pick_number: int,
+    maximum_influence: float = 10.0,
+) -> list[dict[str, object]]:
+    """Rank external player consensus for one team and draft pick.
+
+    The returned influence is capped by ``maximum_influence`` so aggregated
+    outside mocks remain a minor signal rather than replacing UMockMe logic.
+    """
+    counts: dict[str, int] = {}
+    for pick in picks:
+        if str(pick.get("team_id")) == team_id and int(pick.get("pick_number", -1)) == pick_number:
+            player_id = str(pick.get("player_id", ""))
+            if player_id:
+                counts[player_id] = counts.get(player_id, 0) + 1
+    total = sum(counts.values())
+    if not total:
+        return []
+    return [
+        {
+            "player_id": player_id,
+            "mock_count": count,
+            "mock_total": total,
+            "consensus_percent": round(count / total * 100, 2),
+            "influence_score": round(count / total * maximum_influence, 2),
+        }
+        for player_id, count in sorted(counts.items(), key=lambda item: (-item[1], item[0]))
+    ]
+
+
 def select_with_team_randomness(
     candidates: list[str],
     randomness_score: float,

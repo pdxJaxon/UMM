@@ -5,6 +5,10 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -18,8 +22,9 @@ class Settings:
     redis_url: str = "redis://localhost:6379/0"
     big_board_cache_ttl_seconds: int = 3600
     pff_data_url: str = ""
-    pff_api_token: str = ""
+    pff_api_key: str = ""
     pff_request_timeout_seconds: float = 30.0
+    pff_big_board_url: str = "https://www.pff.com/draft/big-board"
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -35,10 +40,11 @@ class Settings:
                 os.getenv("BIG_BOARD_CACHE_TTL_SECONDS", str(cls.big_board_cache_ttl_seconds))
             ),
             pff_data_url=os.getenv("PFF_DATA_URL", cls.pff_data_url),
-            pff_api_token=os.getenv("PFF_API_TOKEN", cls.pff_api_token),
+            pff_api_key=os.getenv("PFF_API_KEY", os.getenv("PFF_API_TOKEN", cls.pff_api_key)),
             pff_request_timeout_seconds=float(
                 os.getenv("PFF_REQUEST_TIMEOUT_SECONDS", str(cls.pff_request_timeout_seconds))
             ),
+            pff_big_board_url=os.getenv("PFF_BIG_BOARD_URL", cls.pff_big_board_url),
         )
 
 

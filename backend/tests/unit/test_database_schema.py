@@ -20,6 +20,8 @@ def test_database_schema_contains_core_tables() -> None:
         "position_importance",
         "team_needs",
         "team_drafting_tendencies",
+        "team_prospect_meetings",
+        "external_mock_picks",
         "players",
         "player_measurements",
         "player_athletic_scores",

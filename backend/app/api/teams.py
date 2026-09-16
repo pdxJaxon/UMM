@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import TeamDraftingTendencyRecord, TeamNeedRecord, TeamRecord
+from app.db.models import TeamDraftingTendencyRecord, TeamNeedRecord, TeamProspectMeetingRecord, TeamRecord
 from app.db.session import get_db
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
@@ -100,4 +100,37 @@ def list_team_tendencies(
             "observed_at": tendency.observed_at.isoformat(),
         }
         for tendency in tendencies
+    ]
+
+
+@router.get("/{team_id}/meetings")
+def list_team_meetings(
+    team_id: str,
+    draft_year: int,
+    session: Session = Depends(get_db),
+) -> list[dict[str, object]]:
+    """Return active prospect meetings for a team and draft year."""
+    meetings = session.scalars(
+        select(TeamProspectMeetingRecord)
+        .where(
+            TeamProspectMeetingRecord.team_id == team_id,
+            TeamProspectMeetingRecord.draft_year == draft_year,
+            TeamProspectMeetingRecord.is_active.is_(True),
+        )
+        .order_by(TeamProspectMeetingRecord.importance_score.desc())
+    ).all()
+    return [
+        {
+            "id": meeting.id,
+            "team_id": meeting.team_id,
+            "player_id": meeting.player_id,
+            "draft_year": meeting.draft_year,
+            "meeting_type": meeting.meeting_type,
+            "importance_score": float(meeting.importance_score),
+            "occurred_at": meeting.occurred_at.isoformat() if meeting.occurred_at else None,
+            "source_name": meeting.source_name,
+            "source_url": meeting.source_url,
+            "notes": meeting.notes,
+        }
+        for meeting in meetings
     ]

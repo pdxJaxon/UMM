@@ -20,13 +20,13 @@ class PFFProvider:
     def __init__(
         self,
         endpoint: str | None = None,
-        api_token: str | None = None,
+        api_key: str | None = None,
         timeout_seconds: float | None = None,
         client: httpx.Client | None = None,
     ) -> None:
         """Create a provider using environment-backed configuration by default."""
         self.endpoint = endpoint if endpoint is not None else settings.pff_data_url
-        self.api_token = api_token if api_token is not None else settings.pff_api_token
+        self.api_key = api_key if api_key is not None else settings.pff_api_key
         self.timeout_seconds = timeout_seconds or settings.pff_request_timeout_seconds
         self.client = client or httpx.Client(timeout=self.timeout_seconds)
 
@@ -35,8 +35,8 @@ class PFFProvider:
         if not self.endpoint:
             raise RuntimeError("PFF_DATA_URL is not configured")
         headers = {"Accept": "application/json"}
-        if self.api_token:
-            headers["Authorization"] = f"Bearer {self.api_token}"
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
         response = self.client.get(self.endpoint, params={"draft_year": draft_year}, headers=headers)
         response.raise_for_status()
         payload = response.json()
@@ -44,6 +44,20 @@ class PFFProvider:
         if not isinstance(records, list):
             raise ValueError("PFF response must contain a players list")
         return [self._normalize(record, draft_year) for record in records]
+
+    def whoami(self) -> dict[str, Any]:
+        """Validate the configured PFF API key and return its entitlement status."""
+        if not self.api_key:
+            raise RuntimeError("PFF_API_KEY is not configured")
+        response = self.client.get(
+            "https://api.pff.com/v1/auth/whoami",
+            headers={"Accept": "application/json", "Authorization": f"Bearer {self.api_key}"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        if not isinstance(payload, dict):
+            raise ValueError("PFF whoami response must be an object")
+        return payload
 
     @staticmethod
     def _normalize(record: dict[str, Any], draft_year: int) -> dict[str, Any]:

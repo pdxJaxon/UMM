@@ -88,6 +88,42 @@ class TeamDraftingTendencyRecord(Base):
     team = relationship("TeamRecord", back_populates="drafting_tendencies")
 
 
+class TeamProspectMeetingRecord(Base):
+    """Auditable meeting event between an NFL team and draft prospect."""
+
+    __tablename__ = "team_prospect_meetings"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    player_id = Column(String(64), ForeignKey("players.id"), nullable=False, index=True)
+    draft_year = Column(Integer, nullable=False, index=True)
+    meeting_type = Column(String(60), nullable=False)
+    importance_score = Column(Numeric(5, 2), nullable=False)
+    occurred_at = Column(DateTime, nullable=True)
+    source_name = Column(String(100), nullable=False)
+    source_url = Column(String(500), nullable=True)
+    notes = Column(String(500), nullable=True)
+    raw_payload = Column(JSON, nullable=False, default=dict)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+
+class ExternalMockPickRecord(Base):
+    """Historical external mock selection used for consensus analysis."""
+
+    __tablename__ = "external_mock_picks"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_name = Column(String(100), nullable=False)
+    source_url = Column(String(500), nullable=True)
+    mock_id = Column(String(150), nullable=False)
+    draft_year = Column(Integer, nullable=False, index=True)
+    pick_number = Column(Integer, nullable=False, index=True)
+    team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    player_id = Column(String(64), ForeignKey("players.id"), nullable=False, index=True)
+    observed_at = Column(DateTime, nullable=False)
+    raw_payload = Column(JSON, nullable=False, default=dict)
+
+
 class CollegeRecord(Base):
     """Persisted FBS college football program record."""
 

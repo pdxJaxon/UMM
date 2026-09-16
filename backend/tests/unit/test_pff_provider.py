@@ -47,6 +47,21 @@ def test_provider_requires_endpoint() -> None:
         PFFProvider(endpoint="").fetch(2027)
 
 
+def test_whoami_uses_pff_api_key_bearer_auth() -> None:
+    """The credential check should call the documented PFF endpoint."""
+    response = Mock()
+    response.json.return_value = {"tier": "pro", "entitled": True, "credential": "api_key"}
+    client = Mock()
+    client.get.return_value = response
+    provider = PFFProvider(api_key="local-key", client=client)
+
+    assert provider.whoami()["entitled"] is True
+    client.get.assert_called_once_with(
+        "https://api.pff.com/v1/auth/whoami",
+        headers={"Accept": "application/json", "Authorization": "Bearer local-key"},
+    )
+
+
 def test_provider_rejects_malformed_response() -> None:
     """Malformed provider records should not enter the prospect database."""
     response = Mock()
