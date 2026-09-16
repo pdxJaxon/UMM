@@ -17,6 +17,9 @@ class Settings:
     database_url: str = "postgresql+psycopg://umockme:umockme@localhost:5432/umockme"
     redis_url: str = "redis://localhost:6379/0"
     big_board_cache_ttl_seconds: int = 3600
+    pff_data_url: str = ""
+    pff_api_token: str = ""
+    pff_request_timeout_seconds: float = 30.0
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -30,6 +33,11 @@ class Settings:
             redis_url=os.getenv("REDIS_URL", cls.redis_url),
             big_board_cache_ttl_seconds=int(
                 os.getenv("BIG_BOARD_CACHE_TTL_SECONDS", str(cls.big_board_cache_ttl_seconds))
+            ),
+            pff_data_url=os.getenv("PFF_DATA_URL", cls.pff_data_url),
+            pff_api_token=os.getenv("PFF_API_TOKEN", cls.pff_api_token),
+            pff_request_timeout_seconds=float(
+                os.getenv("PFF_REQUEST_TIMEOUT_SECONDS", str(cls.pff_request_timeout_seconds))
             ),
         )
 

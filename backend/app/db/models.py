@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from app.db.session import Base
@@ -34,6 +34,84 @@ class TeamRecord(Base):
     city = Column(String(100), nullable=False)
     abbreviation = Column(String(10), unique=True, nullable=False)
     draft_order = Column(Integer, nullable=False)
+    logo_url = Column(String(500), nullable=False)
+    helmet_url = Column(String(500), nullable=True)
+    official_url = Column(String(500), nullable=False)
+    randomness_score = Column(Numeric(5, 2), nullable=False, default=50)
+    draft_needs = relationship("TeamNeedRecord", back_populates="team", cascade="all, delete-orphan")
+    drafting_tendencies = relationship("TeamDraftingTendencyRecord", back_populates="team", cascade="all, delete-orphan")
+
+
+class TeamNeedRecord(Base):
+    """Season-scoped team need with role-specific criticality."""
+
+    __tablename__ = "team_needs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    draft_year = Column(Integer, nullable=False, index=True)
+    position_code = Column(String(20), nullable=False)
+    role_level = Column(String(30), nullable=False)
+    need_score = Column(Numeric(5, 2), nullable=False)
+    quantity = Column(Integer, nullable=False, default=1)
+    source_name = Column(String(100), nullable=False)
+    source_url = Column(String(500), nullable=True)
+    rationale = Column(String(500), nullable=True)
+    observed_at = Column(DateTime, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    team = relationship("TeamRecord", back_populates="draft_needs")
+
+
+class TeamDraftingTendencyRecord(Base):
+    """Auditable team preference rule derived from historical draft behavior."""
+
+    __tablename__ = "team_drafting_tendencies"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    draft_year = Column(Integer, nullable=True, index=True)
+    tendency_type = Column(String(40), nullable=False)
+    position_code = Column(String(20), nullable=True)
+    metric_name = Column(String(60), nullable=True)
+    target_value = Column(String(150), nullable=True)
+    minimum_value = Column(Numeric(8, 2), nullable=True)
+    maximum_value = Column(Numeric(8, 2), nullable=True)
+    preference_score = Column(Numeric(5, 2), nullable=False)
+    confidence_score = Column(Numeric(5, 2), nullable=False, default=0)
+    sample_size = Column(Integer, nullable=False, default=0)
+    source_name = Column(String(100), nullable=False)
+    source_url = Column(String(500), nullable=True)
+    rationale = Column(String(500), nullable=True)
+    observed_at = Column(DateTime, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    raw_payload = Column(JSON, nullable=False, default=dict)
+    team = relationship("TeamRecord", back_populates="drafting_tendencies")
+
+
+class CollegeRecord(Base):
+    """Persisted FBS college football program record."""
+
+    __tablename__ = "colleges"
+
+    id = Column(String(100), primary_key=True)
+    name = Column(String(150), nullable=False)
+    abbreviation = Column(String(20), unique=True, nullable=False)
+    conference = Column(String(80), nullable=False)
+    division = Column(String(20), nullable=False, default="FBS")
+    logo_url = Column(String(500), nullable=False)
+    official_url = Column(String(500), nullable=False)
+
+
+class PositionImportanceRecord(Base):
+    """Versioned baseline importance score for an NFL position group."""
+
+    __tablename__ = "position_importance"
+
+    position_code = Column(String(20), primary_key=True)
+    display_name = Column(String(80), nullable=False)
+    importance_score = Column(Numeric(5, 2), nullable=False)
+    weighting_version = Column(String(40), nullable=False)
+    rationale = Column(String(500), nullable=False)
 
 
 class PlayerRecord(Base):
@@ -45,9 +123,70 @@ class PlayerRecord(Base):
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
     position = Column(String(20), nullable=False)
-    college_id = Column(String(64), nullable=False)
+    college_id = Column(String(100), ForeignKey("colleges.id"), nullable=False)
     draft_year = Column(Integer, nullable=False)
     eligibility_status = Column(String(30), default="eligible", nullable=False)
+    birth_date = Column(DateTime, nullable=True)
+    measurements = relationship("PlayerMeasurementRecord", back_populates="player", cascade="all, delete-orphan")
+    athletic_scores = relationship("PlayerAthleticScoreRecord", back_populates="player", cascade="all, delete-orphan")
+    derogatory_concerns = relationship("PlayerDerogatoryConcernRecord", back_populates="player", cascade="all, delete-orphan")
+
+
+class PlayerDerogatoryConcernRecord(Base):
+    """Auditable negative-issue record with explicit severity and confidence."""
+
+    __tablename__ = "player_derogatory_concerns"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    player_id = Column(String(64), ForeignKey("players.id"), nullable=False, index=True)
+    category = Column(String(60), nullable=False)
+    title = Column(String(200), nullable=False)
+    description = Column(Text, nullable=True)
+    severity = Column(String(20), nullable=False)
+    confidence = Column(String(20), nullable=False, default="reported")
+    status = Column(String(20), nullable=False, default="open")
+    source_name = Column(String(100), nullable=False)
+    source_url = Column(String(500), nullable=True)
+    occurred_at = Column(DateTime, nullable=True)
+    reported_at = Column(DateTime, nullable=False)
+    resolved_at = Column(DateTime, nullable=True)
+    raw_payload = Column(JSON, nullable=False, default=dict)
+    player = relationship("PlayerRecord", back_populates="derogatory_concerns")
+
+
+class PlayerMeasurementRecord(Base):
+    """Append-only physical measurement snapshot from a named source."""
+
+    __tablename__ = "player_measurements"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    player_id = Column(String(64), ForeignKey("players.id"), nullable=False, index=True)
+    observed_at = Column(DateTime, nullable=False)
+    source_name = Column(String(100), nullable=False)
+    source_record_id = Column(String(150), nullable=True)
+    age_years = Column(Numeric(5, 2), nullable=True)
+    height_inches = Column(Numeric(5, 2), nullable=True)
+    weight_lbs = Column(Numeric(6, 2), nullable=True)
+    hand_inches = Column(Numeric(5, 2), nullable=True)
+    arm_inches = Column(Numeric(5, 2), nullable=True)
+    raw_payload = Column(JSON, nullable=False, default=dict)
+    player = relationship("PlayerRecord", back_populates="measurements")
+
+
+class PlayerAthleticScoreRecord(Base):
+    """Append-only athletic score snapshot such as RAS or SPARQ."""
+
+    __tablename__ = "player_athletic_scores"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    player_id = Column(String(64), ForeignKey("players.id"), nullable=False, index=True)
+    observed_at = Column(DateTime, nullable=False)
+    source_name = Column(String(100), nullable=False)
+    metric_name = Column(String(80), nullable=False)
+    score = Column(Numeric(8, 3), nullable=True)
+    score_scale = Column(String(40), nullable=True)
+    raw_payload = Column(JSON, nullable=False, default=dict)
+    player = relationship("PlayerRecord", back_populates="athletic_scores")
 
 
 class DraftRunRecord(Base):
@@ -63,6 +202,7 @@ class DraftRunRecord(Base):
     created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
     completed_at = Column(DateTime, nullable=True)
+    randomness_overrides = Column(JSON, nullable=False, default=dict)
     user = relationship("UserRecord", back_populates="drafts")
     picks = relationship("DraftPickRecord", back_populates="draft_run", cascade="all, delete-orphan")
 
@@ -80,5 +220,6 @@ class DraftPickRecord(Base):
     team_id = Column(String(64), ForeignKey("teams.id"), nullable=False)
     player_id = Column(String(64), ForeignKey("players.id"), nullable=False)
     selection_source = Column(String(30), nullable=False)
+    randomness_factor = Column(Numeric(5, 2), nullable=False, default=0)
     selected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
     draft_run = relationship("DraftRunRecord", back_populates="picks")

@@ -62,7 +62,11 @@ def test_controlled_team_flow_auto_simulates_other_teams() -> None:
 
     response = client.post(
         "/api/drafts",
-        json={"controlled_team_id": "team-2", "draft_year": 2026},
+        json={
+            "controlled_team_id": "team-2",
+            "draft_year": 2026,
+            "randomness_overrides": {"team-1": 0},
+        },
         headers=headers,
     )
     assert response.status_code == 201
