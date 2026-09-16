@@ -15,6 +15,8 @@ class Settings:
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 30
     database_url: str = "postgresql+psycopg://umockme:umockme@localhost:5432/umockme"
+    redis_url: str = "redis://localhost:6379/0"
+    big_board_cache_ttl_seconds: int = 3600
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -25,6 +27,10 @@ class Settings:
             jwt_algorithm=os.getenv("JWT_ALGORITHM", cls.jwt_algorithm),
             access_token_minutes=int(os.getenv("ACCESS_TOKEN_MINUTES", str(cls.access_token_minutes))),
             database_url=os.getenv("DATABASE_URL", cls.database_url),
+            redis_url=os.getenv("REDIS_URL", cls.redis_url),
+            big_board_cache_ttl_seconds=int(
+                os.getenv("BIG_BOARD_CACHE_TTL_SECONDS", str(cls.big_board_cache_ttl_seconds))
+            ),
         )
 
 
