@@ -1,0 +1,19 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: umockme
+      POSTGRES_USER: umockme
+      POSTGRES_PASSWORD: umockme
+    ports:
+      - "5432:5432"
+    volumes:
+      - umockme-postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umockme -d umockme"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  umockme-postgres:
