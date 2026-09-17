@@ -1,11 +1,23 @@
 """Public reference-data endpoints for NFL teams."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import TeamDraftingTendencyRecord, TeamNeedRecord, TeamProspectMeetingRecord, TeamRecord
+from app.core.auth import get_current_user
+from app.db.models import (
+    CollegeRecord,
+    PlayerRecord,
+    TeamBoardRecord,
+    TeamDraftingTendencyRecord,
+    TeamNeedRecord,
+    TeamProspectMeetingRecord,
+    TeamRecord,
+    UserRecord,
+)
 from app.db.session import get_db
+from app.services.team_board_service import copy_board_for_user, generate_persisted_team_board, get_latest_team_board, reorder_personal_board
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
 
@@ -134,3 +146,117 @@ def list_team_meetings(
         }
         for meeting in meetings
     ]
+
+
+@router.get("/{team_id}/board")
+def get_team_board(
+    team_id: str,
+    draft_year: int,
+    session: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Return the latest generated default board for a team and season."""
+    board = session.scalar(
+        select(TeamBoardRecord)
+        .where(
+            TeamBoardRecord.team_id == team_id,
+            TeamBoardRecord.draft_year == draft_year,
+            TeamBoardRecord.board_type == "default",
+        )
+        .order_by(TeamBoardRecord.version.desc())
+        .limit(1)
+    )
+    if board is None:
+        return {"team_id": team_id, "draft_year": draft_year, "board": None, "entries": []}
+    entry_rows = []
+    for entry in sorted(board.entries, key=lambda item: item.rank_position):
+        if not entry.is_active:
+            continue
+        player = session.get(PlayerRecord, entry.player_id)
+        college = session.get(CollegeRecord, player.college_id) if player else None
+        entry_rows.append(
+            {
+                "player_id": entry.player_id,
+                "rank_position": entry.rank_position,
+                "score": float(entry.score),
+                "score_breakdown": entry.score_breakdown,
+                "first_name": player.first_name if player else None,
+                "last_name": player.last_name if player else None,
+                "position": player.position if player else None,
+                "college_id": player.college_id if player else None,
+                "college_name": college.name if college else None,
+                "college_abbreviation": college.abbreviation if college else None,
+            }
+        )
+
+    return {
+        "team_id": board.team_id,
+        "draft_year": board.draft_year,
+        "board": {
+            "id": board.id,
+            "version": board.version,
+            "board_type": board.board_type,
+            "generated_at": board.generated_at.isoformat(),
+            "scoring_version": board.scoring_version,
+            "scoring_weights": board.scoring_weights,
+        },
+        "entries": entry_rows,
+    }
+
+
+@router.post("/{team_id}/board/generate")
+def generate_team_board_endpoint(
+    team_id: str,
+    draft_year: int,
+    current_user: UserRecord = Depends(get_current_user),
+    session: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Generate a fresh default board from current persisted signal data."""
+    del current_user
+    board = generate_persisted_team_board(session, team_id, draft_year)
+    return {
+        "team_id": board.team_id,
+        "draft_year": board.draft_year,
+        "board_id": board.id,
+        "version": board.version,
+        "status": "generated",
+    }
+
+
+class BoardOrderRequest(BaseModel):
+    """Payload containing the complete desired player order."""
+
+    player_ids: list[str]
+
+
+@router.post("/{team_id}/board/copy")
+def copy_team_board_endpoint(
+    team_id: str,
+    draft_year: int,
+    current_user: UserRecord = Depends(get_current_user),
+    session: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Copy the latest default board into the authenticated user's workspace."""
+    source_board = get_latest_team_board(session, team_id, draft_year)
+    if source_board is None:
+        raise HTTPException(status_code=404, detail="Default team board has not been generated")
+    board = copy_board_for_user(session, source_board, current_user.id)
+    return {"board_id": board.id, "team_id": board.team_id, "draft_year": board.draft_year, "version": board.version}
+
+
+@router.put("/{team_id}/board/{board_id}/order")
+def reorder_team_board_endpoint(
+    team_id: str,
+    board_id: int,
+    payload: BoardOrderRequest,
+    current_user: UserRecord = Depends(get_current_user),
+    session: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Save a reordered player list on an owned personal board."""
+    board = session.get(TeamBoardRecord, board_id)
+    if board is None or board.team_id != team_id or board.user_id != current_user.id or board.board_type != "personal":
+        raise HTTPException(status_code=404, detail="Personal board not found")
+    try:
+        board = reorder_personal_board(session, board, payload.player_ids)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"board_id": board.id, "version": board.version, "player_ids": payload.player_ids}

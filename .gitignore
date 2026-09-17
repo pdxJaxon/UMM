@@ -7,6 +7,14 @@ __pycache__/
 .coverage
 htmlcov/
 
+# Frontend build artifacts
+frontend/angular-app/node_modules/
+frontend/angular-app/dist/
+frontend/angular-app/.angular/
+
+# Local databases
+backend/umockme.db
+
 # Local environments and secrets
 .venv/
 venv/

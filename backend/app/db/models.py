@@ -40,6 +40,7 @@ class TeamRecord(Base):
     randomness_score = Column(Numeric(5, 2), nullable=False, default=50)
     draft_needs = relationship("TeamNeedRecord", back_populates="team", cascade="all, delete-orphan")
     drafting_tendencies = relationship("TeamDraftingTendencyRecord", back_populates="team", cascade="all, delete-orphan")
+    boards = relationship("TeamBoardRecord", back_populates="team", cascade="all, delete-orphan")
 
 
 class TeamNeedRecord(Base):
@@ -60,6 +61,40 @@ class TeamNeedRecord(Base):
     observed_at = Column(DateTime, nullable=False)
     is_active = Column(Boolean, nullable=False, default=True)
     team = relationship("TeamRecord", back_populates="draft_needs")
+
+
+class TeamBoardRecord(Base):
+    """Versioned default or user-customized board for one team and season."""
+
+    __tablename__ = "team_boards"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    user_id = Column(String(64), ForeignKey("users.id"), nullable=True, index=True)
+    draft_year = Column(Integer, nullable=False, index=True)
+    board_type = Column(String(20), nullable=False, default="default")
+    version = Column(Integer, nullable=False, default=1)
+    generated_at = Column(DateTime, nullable=False)
+    scoring_version = Column(String(50), nullable=False)
+    scoring_weights = Column(JSON, nullable=False, default=dict)
+    team = relationship("TeamRecord", back_populates="boards")
+    entries = relationship("TeamBoardEntryRecord", back_populates="board", cascade="all, delete-orphan")
+
+
+class TeamBoardEntryRecord(Base):
+    """Ranked player entry with an explainable score breakdown."""
+
+    __tablename__ = "team_board_entries"
+    __table_args__ = (UniqueConstraint("board_id", "player_id", name="uq_team_board_player"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    board_id = Column(Integer, ForeignKey("team_boards.id"), nullable=False, index=True)
+    player_id = Column(String(64), ForeignKey("players.id"), nullable=False, index=True)
+    rank_position = Column(Integer, nullable=False)
+    score = Column(Numeric(8, 3), nullable=False)
+    score_breakdown = Column(JSON, nullable=False, default=dict)
+    is_active = Column(Boolean, nullable=False, default=True)
+    board = relationship("TeamBoardRecord", back_populates="entries")
 
 
 class TeamDraftingTendencyRecord(Base):
@@ -122,6 +157,22 @@ class ExternalMockPickRecord(Base):
     player_id = Column(String(64), ForeignKey("players.id"), nullable=False, index=True)
     observed_at = Column(DateTime, nullable=False)
     raw_payload = Column(JSON, nullable=False, default=dict)
+
+
+class ProspectRefreshRunRecord(Base):
+    """Audit record for one scheduled or manually triggered prospect refresh."""
+
+    __tablename__ = "prospect_refresh_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    draft_year = Column(Integer, nullable=False, index=True)
+    status = Column(String(20), nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    processed_count = Column(Integer, nullable=False, default=0)
+    source_names = Column(JSON, nullable=False, default=list)
+    started_at = Column(DateTime, nullable=False)
+    completed_at = Column(DateTime, nullable=True)
+    error_message = Column(Text, nullable=True)
 
 
 class CollegeRecord(Base):

@@ -7,7 +7,7 @@ import random
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import DraftPickRecord, DraftRunRecord, PlayerRecord, TeamRecord
+from app.db.models import DraftPickRecord, DraftRunRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord
 from app.services.ranking_service import select_with_team_randomness
 
 TEAM_ORDER = ("team-1", "team-2", "team-3")
@@ -71,11 +71,13 @@ class DraftRepository:
         picks = self._ordered_picks(draft.id)
         while draft.status != "completed" and self.current_team_id(len(picks)) != draft.controlled_team_id:
             selected = {pick.player_id for pick in picks}
-            remaining = [candidate for candidate in PLAYER_ORDER if candidate not in selected]
+            team_id = self.current_team_id(len(picks))
+            remaining = self._available_board_candidates(draft, team_id, selected)
+            if not remaining:
+                remaining = [candidate for candidate in PLAYER_ORDER if candidate not in selected]
             if not remaining:
                 draft.status = "completed"
                 break
-            team_id = self.current_team_id(len(picks))
             team = self.session.get(TeamRecord, team_id)
             baseline = float(team.randomness_score or 0) if team else 50.0
             randomness = draft.randomness_overrides.get(team_id, baseline)
@@ -102,6 +104,35 @@ class DraftRepository:
         """Load a draft's picks in immutable pick order."""
         statement = select(DraftPickRecord).where(DraftPickRecord.draft_run_id == draft_id).order_by(DraftPickRecord.pick_number)
         return list(self.session.scalars(statement))
+
+    def _available_board_candidates(
+        self,
+        draft: DraftRunRecord,
+        team_id: str,
+        selected: set[str],
+    ) -> list[str]:
+        """Return available players from the latest generated team board."""
+        board = self.session.scalar(
+            select(TeamBoardRecord)
+            .where(
+                TeamBoardRecord.team_id == team_id,
+                TeamBoardRecord.draft_year == draft.draft_year,
+                TeamBoardRecord.board_type == "default",
+            )
+            .order_by(TeamBoardRecord.version.desc())
+            .limit(1)
+        )
+        if board is None:
+            return []
+        entries = self.session.scalars(
+            select(TeamBoardEntryRecord)
+            .where(
+                TeamBoardEntryRecord.board_id == board.id,
+                TeamBoardEntryRecord.is_active.is_(True),
+            )
+            .order_by(TeamBoardEntryRecord.rank_position)
+        ).all()
+        return [entry.player_id for entry in entries if entry.player_id not in selected]
 
     def _next_id(self, prefix: str) -> str:
         """Generate a collision-resistant identifier within the current database."""

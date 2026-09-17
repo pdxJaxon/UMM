@@ -1,5 +1,7 @@
 """Contract-level tests for the mock draft lifecycle."""
 
+from datetime import datetime
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -8,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
 from app.db.initialize import PLAYERS, TEAMS
-from app.db.models import PlayerRecord, TeamRecord, UserRecord
+from app.db.models import PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, UserRecord
 from app.db.session import Base, get_db
 from app.main import app
 
@@ -50,7 +52,7 @@ def isolate_draft_store() -> None:
         yield session
 
     app.dependency_overrides[get_db] = override_get_db
-    yield
+    yield session
     app.dependency_overrides.clear()
     session.close()
 
@@ -129,3 +131,35 @@ def test_duplicate_player_selection_is_rejected() -> None:
 
     assert first.status_code == 201
     assert duplicate.status_code == 409
+
+
+def test_auto_simulation_uses_latest_team_board_order(isolate_draft_store: Session) -> None:
+    """Automatic picks should prefer the generated board for the team on the clock."""
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {create_access_token('user-1')}"}
+    session = isolate_draft_store
+    board = TeamBoardRecord(
+        team_id="team-1",
+        draft_year=2026,
+        board_type="default",
+        version=1,
+        generated_at=datetime.utcnow(),
+        scoring_version="test",
+        scoring_weights={},
+    )
+    session.add(board)
+    session.flush()
+    session.add(TeamBoardEntryRecord(board_id=board.id, player_id="player-3", rank_position=1, score=99, score_breakdown={}))
+    session.add(TeamBoardEntryRecord(board_id=board.id, player_id="player-1", rank_position=2, score=90, score_breakdown={}))
+    session.commit()
+
+    response = client.post(
+        "/api/drafts",
+        json={"controlled_team_id": "team-2", "draft_year": 2026, "randomness_overrides": {"team-1": 0}},
+        headers=headers,
+    )
+    draft_id = response.json()["draft_run_id"]
+    response = client.post(f"/api/drafts/{draft_id}/auto-simulate", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["picks"][0]["player_id"] == "player-3"

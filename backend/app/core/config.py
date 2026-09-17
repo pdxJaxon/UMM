@@ -18,7 +18,7 @@ class Settings:
     secret_key: str = "dev-secret-key"
     jwt_algorithm: str = "HS256"
     access_token_minutes: int = 30
-    database_url: str = "postgresql+psycopg://umockme:umockme@localhost:5432/umockme"
+    database_url: str = "sqlite:///./umockme.db"
     redis_url: str = "redis://localhost:6379/0"
     big_board_cache_ttl_seconds: int = 3600
     pff_data_url: str = ""
