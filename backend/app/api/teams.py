@@ -1,11 +1,11 @@
 """Public reference-data endpoints for NFL teams."""
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, get_optional_current_user
 from app.db.models import (
     CollegeRecord,
     PlayerRecord,
@@ -17,7 +17,7 @@ from app.db.models import (
     UserRecord,
 )
 from app.db.session import get_db
-from app.services.team_board_service import copy_board_for_user, generate_persisted_team_board, get_latest_team_board, reorder_personal_board
+from app.services.team_board_service import copy_board_for_user, generate_persisted_team_board, get_latest_board, get_latest_team_board, reorder_personal_board
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
 
@@ -152,18 +152,19 @@ def list_team_meetings(
 def get_team_board(
     team_id: str,
     draft_year: int,
+    board_type: str = Query(default="default", pattern="^(default|personal)$"),
+    current_user: UserRecord | None = Depends(get_optional_current_user),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    """Return the latest generated default board for a team and season."""
-    board = session.scalar(
-        select(TeamBoardRecord)
-        .where(
-            TeamBoardRecord.team_id == team_id,
-            TeamBoardRecord.draft_year == draft_year,
-            TeamBoardRecord.board_type == "default",
-        )
-        .order_by(TeamBoardRecord.version.desc())
-        .limit(1)
+    """Return the latest generated default or personal board for a team and season."""
+    if board_type == "personal" and current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    board = get_latest_board(
+        session,
+        team_id,
+        draft_year,
+        board_type=board_type,
+        user_id=current_user.id if board_type == "personal" and current_user else None,
     )
     if board is None:
         return {"team_id": team_id, "draft_year": draft_year, "board": None, "entries": []}

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 @dataclass
@@ -17,4 +17,4 @@ class DraftPick:
     team_id: str
     player_id: str
     selection_source: str
-    selected_at: datetime = field(default_factory=datetime.utcnow)
+    selected_at: datetime = field(default_factory=lambda: datetime.now(UTC))

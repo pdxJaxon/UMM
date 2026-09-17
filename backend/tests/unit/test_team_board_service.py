@@ -4,7 +4,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.db.session import Base
-from app.services.team_board_service import generate_team_board, get_latest_team_board
+from app.services.team_board_service import generate_team_board, get_latest_board, get_latest_team_board
 
 
 def test_generate_team_board_ranks_candidates_and_versions_boards() -> None:
@@ -26,3 +26,20 @@ def test_generate_team_board_ranks_candidates_and_versions_boards() -> None:
         assert latest.id == second.id
         assert latest.entries[0].player_id == "player-high"
         assert "player_evaluation" in latest.entries[0].score_breakdown
+
+
+def test_get_latest_board_can_return_personal_board() -> None:
+    """Personal boards should be retrievable independently from default boards."""
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    candidates = [{"id": "player-1", "position": "QB", "ranking_values": {"pff": 90}}]
+
+    with Session(engine) as session:
+        generate_team_board(session, "team-1", 2027, candidates)
+        personal = generate_team_board(session, "team-1", 2027, candidates, board_type="personal", user_id="user-1")
+
+        latest = get_latest_board(session, "team-1", 2027, board_type="personal", user_id="user-1")
+
+        assert latest is not None
+        assert latest.id == personal.id
+        assert latest.board_type == "personal"

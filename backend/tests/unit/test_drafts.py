@@ -1,6 +1,6 @@
 """Contract-level tests for the mock draft lifecycle."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -143,7 +143,7 @@ def test_auto_simulation_uses_latest_team_board_order(isolate_draft_store: Sessi
         draft_year=2026,
         board_type="default",
         version=1,
-        generated_at=datetime.utcnow(),
+        generated_at=datetime.now(UTC),
         scoring_version="test",
         scoring_weights={},
     )

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, Protocol
 
 from sqlalchemy.orm import Session
@@ -27,7 +27,7 @@ class ProspectIngestionService:
 
     def refresh(self, draft_year: int, observed_at: datetime | None = None) -> int:
         """Ingest a provider batch and return the number of processed prospects."""
-        timestamp = observed_at or datetime.utcnow()
+        timestamp = observed_at or datetime.now(UTC)
         processed = 0
         for payload in self.provider.fetch(draft_year):
             self._upsert_prospect(payload, draft_year, timestamp)

@@ -1,7 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { HttpClient, HttpClientModule } from '@angular/common/http';
+import { HttpClient, HttpClientModule, HttpErrorResponse } from '@angular/common/http';
 
 interface TeamOption {
   id: string;
@@ -34,10 +34,26 @@ interface TeamBoardEntryPayload {
   college_abbreviation?: string | null;
 }
 
+interface TeamBoardMetadata {
+  id: number;
+  version: number;
+  board_type: 'default' | 'personal';
+  generated_at: string;
+  scoring_version: string;
+}
+
 interface TeamBoardResponse {
   team_id: string;
   draft_year: number;
+  board: TeamBoardMetadata | null;
   entries: TeamBoardEntryPayload[];
+}
+
+interface AuthResponse {
+  id: string;
+  email: string;
+  access_token: string;
+  token_type: string;
 }
 
 @Component({
@@ -51,18 +67,29 @@ export class AppComponent implements OnInit {
   protected teams: TeamOption[] = [];
   protected selectedTeamId = '';
   protected boardMode: 'default' | 'personal' = 'default';
+  protected authMode: 'login' | 'register' = 'login';
   protected activeEntry: BoardEntry | null = null;
   protected saved = false;
   protected entries: BoardEntry[] = [];
   protected loading = false;
   protected error: string | null = null;
+  protected authMessage: string | null = null;
+  protected authEmail = '';
+  protected authPassword = '';
+  protected authFirstName = '';
+  protected authLastName = '';
+  protected boardVersion: number | null = null;
+
+  private readonly apiBase = 'http://localhost:8000';
+  private accessToken = '';
+  private boardId: number | null = null;
 
   private readonly draftYear = 2027;
 
   constructor(private readonly http: HttpClient) {}
 
   ngOnInit(): void {
-    this.http.get<TeamOption[]>('http://localhost:8000/api/teams').subscribe({
+    this.http.get<TeamOption[]>(`${this.apiBase}/api/teams`).subscribe({
       next: (teams) => {
         this.teams = teams;
         if (teams.length > 0) {
@@ -80,8 +107,58 @@ export class AppComponent implements OnInit {
     return this.teams.find((team) => team.id === this.selectedTeamId)?.name ?? 'Select team';
   }
 
+  protected get isAuthenticated(): boolean {
+    return this.accessToken.length > 0;
+  }
+
+  protected get canCopyBoard(): boolean {
+    return this.isAuthenticated && this.boardMode === 'default' && this.entries.length > 0;
+  }
+
+  protected get canSaveBoard(): boolean {
+    return this.isAuthenticated && this.boardMode === 'personal' && this.entries.length > 0 && this.boardId !== null;
+  }
+
+  protected get syncLabel(): string {
+    if (this.boardMode === 'personal' && this.boardVersion !== null) {
+      return `My board v${this.boardVersion}`;
+    }
+    if (this.boardVersion !== null) {
+      return `Default board v${this.boardVersion}`;
+    }
+    return this.isAuthenticated ? 'Signed in' : 'Guest mode';
+  }
+
+  protected get boardActionLabel(): string {
+    if (this.boardMode === 'personal') {
+      return this.canSaveBoard ? (this.saved ? 'Saved' : 'Save changes') : 'Copy to edit';
+    }
+    return this.entries.length > 0 ? 'Copy to My board' : 'Generate default board';
+  }
+
+  protected get boardActionEnabled(): boolean {
+    if (this.boardMode === 'personal') {
+      return this.canSaveBoard;
+    }
+    return this.entries.length > 0 ? this.canCopyBoard : this.isAuthenticated;
+  }
+
   protected onTeamChange(): void {
+    this.boardId = null;
+    this.boardVersion = null;
     this.loadBoard();
+  }
+
+  protected setBoardMode(mode: 'default' | 'personal'): void {
+    this.boardMode = mode;
+    this.boardId = null;
+    this.boardVersion = null;
+    this.loadBoard();
+  }
+
+  protected setAuthMode(mode: 'login' | 'register'): void {
+    this.authMode = mode;
+    this.authMessage = null;
   }
 
   protected loadBoard(): void {
@@ -91,40 +168,127 @@ export class AppComponent implements OnInit {
       return;
     }
 
+    if (this.boardMode === 'personal' && !this.isAuthenticated) {
+      this.entries = [];
+      this.activeEntry = null;
+      this.error = 'Sign in to load or save your personal board.';
+      return;
+    }
+
     this.loading = true;
     this.error = null;
 
     this.http
-      .get<TeamBoardResponse>(`http://localhost:8000/api/teams/${this.selectedTeamId}/board?draft_year=${this.draftYear}`)
+      .get<TeamBoardResponse>(
+        `${this.apiBase}/api/teams/${this.selectedTeamId}/board?draft_year=${this.draftYear}&board_type=${this.boardMode}`,
+        this.requestOptions(this.boardMode === 'personal')
+      )
       .subscribe({
         next: (response) => {
-          this.entries = (response.entries ?? []).map((entry, index) => {
-            const breakdown = entry.score_breakdown ?? {};
-            const name = [entry.first_name, entry.last_name].filter(Boolean).join(' ') || 'Unknown prospect';
-            const needValue = Number(breakdown.need ?? breakdown.team_need ?? 0);
-            const fitValue = Number(breakdown.fit ?? breakdown.team_fit ?? 0);
-            return {
-              rank: entry.rank_position ?? index + 1,
-              player_id: entry.player_id,
-              name,
-              position: entry.position ?? 'N/A',
-              school: entry.college_name ?? entry.college_abbreviation ?? 'N/A',
-              score: Number(entry.score ?? 0),
-              need: needValue,
-              fit: fitValue,
-              source: 'API'
-            };
-          });
+          this.boardId = response.board?.id ?? null;
+          this.boardVersion = response.board?.version ?? null;
+          this.entries = this.mapEntries(response.entries ?? []);
           this.loading = false;
           this.activeEntry = this.entries[0] ?? null;
+          if (!response.board) {
+            this.error = this.boardMode === 'personal'
+              ? 'No personal board yet. Copy the default board to start editing.'
+              : 'No board is available yet for this team. Generate one to continue.';
+          }
         },
-        error: () => {
+        error: (error: HttpErrorResponse) => {
           this.loading = false;
           this.entries = [];
           this.activeEntry = null;
-          this.error = 'No board is available yet for this team.';
+          this.boardId = null;
+          this.boardVersion = null;
+          this.error = this.describeApiError(error, this.boardMode === 'personal'
+            ? 'Unable to load your personal board.'
+            : 'No board is available yet for this team.');
         }
       });
+  }
+
+  protected register(): void {
+    this.authMessage = null;
+    this.error = null;
+    this.http.post<AuthResponse>(`${this.apiBase}/auth/register`, {
+      email: this.authEmail,
+      password: this.authPassword,
+      first_name: this.authFirstName,
+      last_name: this.authLastName
+    }).subscribe({
+      next: (response) => {
+        this.completeAuthentication(response, 'Account created.');
+      },
+      error: (error: HttpErrorResponse) => {
+        this.authMessage = this.describeApiError(error, 'Unable to create account.');
+      }
+    });
+  }
+
+  protected login(): void {
+    this.authMessage = null;
+    this.error = null;
+    this.http.post<AuthResponse>(`${this.apiBase}/auth/login`, {
+      email: this.authEmail,
+      password: this.authPassword
+    }).subscribe({
+      next: (response) => {
+        this.completeAuthentication(response, 'Signed in.');
+      },
+      error: (error: HttpErrorResponse) => {
+        this.authMessage = this.describeApiError(error, 'Unable to sign in.');
+      }
+    });
+  }
+
+  protected generateBoard(): void {
+    if (!this.ensureAuthenticated('Sign in before generating a board.')) {
+      return;
+    }
+    this.loading = true;
+    this.error = null;
+    this.http.post<{ status: string }>(
+      `${this.apiBase}/api/teams/${this.selectedTeamId}/board/generate?draft_year=${this.draftYear}`,
+      {},
+      this.requestOptions(true)
+    ).subscribe({
+      next: () => {
+        this.boardMode = 'default';
+        this.authMessage = 'Default board generated.';
+        this.loadBoard();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.loading = false;
+        this.error = this.describeApiError(error, 'Unable to generate the default board.');
+      }
+    });
+  }
+
+  protected copyBoard(): void {
+    if (!this.ensureAuthenticated('Sign in before copying a personal board.')) {
+      return;
+    }
+    this.loading = true;
+    this.error = null;
+    this.http.post<{ board_id: number; version: number }>(
+      `${this.apiBase}/api/teams/${this.selectedTeamId}/board/copy?draft_year=${this.draftYear}`,
+      {},
+      this.requestOptions(true)
+    ).subscribe({
+      next: (response) => {
+        this.boardMode = 'personal';
+        this.boardId = response.board_id;
+        this.boardVersion = response.version;
+        this.authMessage = 'Personal board ready.';
+        this.loadBoard();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.loading = false;
+        this.error = this.describeApiError(error, 'Unable to copy the default board.');
+      }
+    });
   }
 
   protected selectEntry(entry: BoardEntry): void {
@@ -132,16 +296,117 @@ export class AppComponent implements OnInit {
   }
 
   protected saveBoard(): void {
-    this.saved = true;
-    setTimeout(() => this.saved = false, 2200);
+    if (!this.ensureAuthenticated('Sign in before saving your personal board.')) {
+      return;
+    }
+    if (this.boardMode !== 'personal' || this.boardId === null) {
+      this.error = 'Copy the default board into My board before saving changes.';
+      return;
+    }
+    this.error = null;
+    this.http.put<{ version: number }>(
+      `${this.apiBase}/api/teams/${this.selectedTeamId}/board/${this.boardId}/order`,
+      { player_ids: this.entries.map((entry) => entry.player_id) },
+      this.requestOptions(true)
+    ).subscribe({
+      next: (response) => {
+        this.boardVersion = response.version;
+        this.saved = true;
+        this.authMessage = 'Personal board saved.';
+        setTimeout(() => this.saved = false, 2200);
+      },
+      error: (error: HttpErrorResponse) => {
+        this.error = this.describeApiError(error, 'Unable to save your board order.');
+      }
+    });
+  }
+
+  protected logout(): void {
+    this.accessToken = '';
+    this.boardId = null;
+    this.boardVersion = null;
+    this.authMessage = 'Signed out.';
+    if (this.boardMode === 'personal') {
+      this.boardMode = 'default';
+    }
+    this.loadBoard();
+  }
+
+  protected completeBoardAction(): void {
+    if (this.boardMode === 'personal') {
+      this.saveBoard();
+      return;
+    }
+    if (this.entries.length > 0) {
+      this.copyBoard();
+      return;
+    }
+    this.generateBoard();
   }
 
   protected moveEntry(index: number, direction: -1 | 1): void {
     const target = index + direction;
     if (target < 0 || target >= this.entries.length) return;
+    if (this.boardMode !== 'personal') return;
+    const selectedPlayerId = this.activeEntry?.player_id ?? null;
     const next = [...this.entries];
     [next[index], next[target]] = [next[target], next[index]];
     this.entries = next.map((entry, position) => ({ ...entry, rank: position + 1 }));
-    this.activeEntry = this.entries[index] ?? null;
+    this.activeEntry = selectedPlayerId
+      ? this.entries.find((entry) => entry.player_id === selectedPlayerId) ?? this.entries[target] ?? null
+      : this.entries[target] ?? null;
+  }
+
+  private completeAuthentication(response: AuthResponse, message: string): void {
+    this.accessToken = response.access_token;
+    this.authMessage = `${message} Signed in as ${response.email}.`;
+    this.authPassword = '';
+    if (this.boardMode === 'personal') {
+      this.loadBoard();
+    }
+  }
+
+  private ensureAuthenticated(message: string): boolean {
+    if (this.isAuthenticated) {
+      return true;
+    }
+    this.error = message;
+    return false;
+  }
+
+  private requestOptions(includeAuth: boolean): { headers?: Record<string, string> } {
+    if (!includeAuth || !this.accessToken) {
+      return {};
+    }
+    return {
+      headers: {
+        Authorization: `Bearer ${this.accessToken}`
+      }
+    };
+  }
+
+  private mapEntries(entries: TeamBoardEntryPayload[]): BoardEntry[] {
+    return entries.map((entry, index) => {
+      const breakdown = entry.score_breakdown ?? {};
+      const name = [entry.first_name, entry.last_name].filter(Boolean).join(' ') || 'Unknown prospect';
+      const needValue = Number(breakdown.need ?? breakdown.team_need ?? 0);
+      const fitValue = Number(breakdown.fit ?? breakdown.team_fit ?? 0);
+      return {
+        rank: entry.rank_position ?? index + 1,
+        player_id: entry.player_id,
+        name,
+        position: entry.position ?? 'N/A',
+        school: entry.college_name ?? entry.college_abbreviation ?? 'N/A',
+        score: Number(entry.score ?? 0),
+        need: needValue,
+        fit: fitValue,
+        source: this.boardMode === 'personal' ? 'My board' : 'Default board'
+      };
+    });
+  }
+
+  private describeApiError(error: HttpErrorResponse, fallback: string): string {
+    const detail = typeof error.error?.detail === 'string' ? error.error.detail : null;
+    return detail ?? fallback;
   }
 }

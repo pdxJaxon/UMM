@@ -1,5 +1,7 @@
 """Tests for the team board retrieval endpoint."""
 
+from datetime import UTC, datetime
+
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -53,7 +55,7 @@ def test_team_board_endpoint_includes_player_details() -> None:
         draft_year=2027,
         board_type="default",
         version=1,
-        generated_at=__import__("datetime").datetime.utcnow(),
+        generated_at=datetime.now(UTC),
         scoring_version="test",
         scoring_weights={},
     )

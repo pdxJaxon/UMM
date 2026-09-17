@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import select
@@ -52,7 +52,7 @@ def generate_team_board(
         draft_year=draft_year,
         board_type=board_type,
         version=(previous_version or 0) + 1,
-        generated_at=datetime.utcnow(),
+        generated_at=datetime.now(UTC),
         scoring_version="draft-score-v1",
         scoring_weights=weights.__dict__,
     )
@@ -92,12 +92,24 @@ def generate_team_board(
 
 def get_latest_team_board(session: Session, team_id: str, draft_year: int) -> TeamBoardRecord | None:
     """Return the latest default board for a team and draft year."""
+    return get_latest_board(session, team_id, draft_year)
+
+
+def get_latest_board(
+    session: Session,
+    team_id: str,
+    draft_year: int,
+    board_type: str = "default",
+    user_id: str | None = None,
+) -> TeamBoardRecord | None:
+    """Return the latest board for a team, season, type, and optional owner."""
     return session.scalar(
         select(TeamBoardRecord)
         .where(
             TeamBoardRecord.team_id == team_id,
             TeamBoardRecord.draft_year == draft_year,
-            TeamBoardRecord.board_type == "default",
+            TeamBoardRecord.board_type == board_type,
+            TeamBoardRecord.user_id == user_id,
         )
         .order_by(TeamBoardRecord.version.desc())
         .limit(1)
@@ -116,7 +128,7 @@ def copy_board_for_user(
         draft_year=source_board.draft_year,
         board_type="personal",
         version=1,
-        generated_at=datetime.utcnow(),
+        generated_at=datetime.now(UTC),
         scoring_version=source_board.scoring_version,
         scoring_weights=source_board.scoring_weights,
     )

@@ -1,6 +1,6 @@
 """PostgreSQL-backed relational models for the draft domain."""
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
@@ -19,8 +19,8 @@ class UserRecord(Base):
     first_name = Column(String(100), nullable=False)
     last_name = Column(String(100), nullable=False)
     is_active = Column(Boolean, default=True, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
     drafts = relationship("DraftRunRecord", back_populates="user")
 
 
@@ -286,8 +286,8 @@ class DraftRunRecord(Base):
     controlled_team_id = Column(String(64), ForeignKey("teams.id"), nullable=False)
     draft_year = Column(Integer, nullable=False)
     status = Column(String(20), default="drafting", nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
     completed_at = Column(DateTime, nullable=True)
     randomness_overrides = Column(JSON, nullable=False, default=dict)
     user = relationship("UserRecord", back_populates="drafts")
@@ -308,5 +308,5 @@ class DraftPickRecord(Base):
     player_id = Column(String(64), ForeignKey("players.id"), nullable=False)
     selection_source = Column(String(30), nullable=False)
     randomness_factor = Column(Numeric(5, 2), nullable=False, default=0)
-    selected_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    selected_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     draft_run = relationship("DraftRunRecord", back_populates="picks")

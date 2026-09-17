@@ -2,8 +2,37 @@
   <header class="topbar">
     <div class="brand"><span class="brand-mark">UM</span><span>UMockMe</span></div>
     <div class="season">2027 NFL DRAFT <span class="live-dot"></span></div>
-    <button class="profile" aria-label="Open profile">JD</button>
+    <button class="profile" [attr.aria-label]="isAuthenticated ? 'Sign out' : 'Account controls'" (click)="isAuthenticated && logout()">{{ isAuthenticated ? 'ON' : 'UM' }}</button>
   </header>
+
+  <section class="account-bar" aria-label="Account controls">
+    <ng-container *ngIf="!isAuthenticated; else signedIn">
+      <div class="account-copy">
+        <strong>{{ authMode === 'login' ? 'Continue your board' : 'Create your scouting workspace' }}</strong>
+        <span>{{ authMode === 'login' ? 'Sign in to build and save a personal board.' : 'Use a unique email and an 8-character password.' }}</span>
+      </div>
+      <div class="account-form">
+        <input [(ngModel)]="authEmail" type="email" aria-label="Email" placeholder="Email address">
+        <input [(ngModel)]="authPassword" type="password" aria-label="Password" placeholder="Password">
+        <ng-container *ngIf="authMode === 'register'">
+          <input [(ngModel)]="authFirstName" type="text" aria-label="First name" placeholder="First name">
+          <input [(ngModel)]="authLastName" type="text" aria-label="Last name" placeholder="Last name">
+        </ng-container>
+        <button class="action primary" (click)="authMode === 'login' ? login() : register()">{{ authMode === 'login' ? 'Sign in' : 'Create account' }}</button>
+      </div>
+      <button class="text-button" (click)="setAuthMode(authMode === 'login' ? 'register' : 'login')">
+        {{ authMode === 'login' ? 'New here? Create an account' : 'Already have an account? Sign in' }}
+      </button>
+    </ng-container>
+    <ng-template #signedIn>
+      <div class="account-copy">
+        <strong>Signed in</strong>
+        <span>{{ authMessage ?? 'Your personal board is ready to use.' }}</span>
+      </div>
+      <button class="action" (click)="logout()">Sign out</button>
+    </ng-template>
+    <p *ngIf="authMessage && !isAuthenticated" class="feedback">{{ authMessage }}</p>
+  </section>
 
   <section class="workspace-header">
     <div>
@@ -11,7 +40,10 @@
       <h1>Draft board, with receipts.</h1>
       <p class="subhead">Every rank is a conversation between talent, need, tendencies, and evidence.</p>
     </div>
-    <button class="action primary" (click)="saveBoard()">{{ saved ? 'Saved' : 'Save board' }}</button>
+    <div class="board-action">
+      <span>{{ boardMode === 'personal' ? 'Reorder with the arrows, then save.' : 'Start with the team model, then make it yours.' }}</span>
+      <button class="action primary" (click)="completeBoardAction()" [disabled]="!boardActionEnabled">{{ boardActionLabel }}</button>
+    </div>
   </section>
 
   <section class="control-strip" aria-label="Board controls">
@@ -21,10 +53,10 @@
       </select>
     </label>
     <div class="segmented">
-      <button [class.active]="boardMode === 'default'" (click)="boardMode = 'default'">Default board</button>
-      <button [class.active]="boardMode === 'personal'" (click)="boardMode = 'personal'">My board</button>
+      <button [class.active]="boardMode === 'default'" (click)="setBoardMode('default')">Default board</button>
+      <button [class.active]="boardMode === 'personal'" (click)="setBoardMode('personal')">My board</button>
     </div>
-    <span class="status"><span class="status-dot"></span> Synced 4 min ago</span>
+    <span class="status"><span class="status-dot"></span> {{ syncLabel }}</span>
   </section>
 
   <section class="board-layout">
@@ -37,7 +69,11 @@
         <span class="count">{{ entries.length }} prospects</span>
       </div>
 
-      <div *ngIf="error" class="api-error">{{ error }}</div>
+      <div *ngIf="error" class="api-error">
+        <span>{{ error }}</span>
+        <button *ngIf="boardMode === 'default' && isAuthenticated" class="text-button" (click)="generateBoard()">Generate board</button>
+        <button *ngIf="boardMode === 'personal' && isAuthenticated" class="text-button" (click)="setBoardMode('default')">View default board</button>
+      </div>
       <div *ngIf="loading" class="api-loading">Loading board…</div>
 
       <div class="board-list" *ngIf="!loading && !error">
@@ -48,8 +84,8 @@
             <span>{{ entry.position }} · {{ entry.school }}</span>
           </div>
           <span class="score">{{ entry.score | number:'1.1-1' }}<small>UMM</small></span>
-          <button class="move" (click)="$event.stopPropagation(); moveEntry(i, -1)" [disabled]="i === 0">↑</button>
-          <button class="move" (click)="$event.stopPropagation(); moveEntry(i, 1)" [disabled]="i === entries.length - 1">↓</button>
+          <button class="move" (click)="$event.stopPropagation(); moveEntry(i, -1)" [disabled]="boardMode !== 'personal' || i === 0">↑</button>
+          <button class="move" (click)="$event.stopPropagation(); moveEntry(i, 1)" [disabled]="boardMode !== 'personal' || i === entries.length - 1">↓</button>
         </article>
       </div>
     </div>

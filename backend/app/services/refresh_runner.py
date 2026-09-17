@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy.orm import Session
 
@@ -23,7 +23,7 @@ def run_refresh_with_retries(
     """Run a refresh with bounded retries and persist a final audit outcome."""
     provider_list = list(providers)
     source_names = [provider.__class__.__name__ for provider in provider_list]
-    started_at = datetime.utcnow()
+    started_at = datetime.now(UTC)
     audit = ProspectRefreshRunRecord(
         draft_year=draft_year,
         status="running",
@@ -42,7 +42,7 @@ def run_refresh_with_retries(
                 processed = run_weekly_prospect_refresh(session, draft_year, provider_list, started_at)
                 audit.status = "succeeded"
                 audit.processed_count = processed
-                audit.completed_at = datetime.utcnow()
+                audit.completed_at = datetime.now(UTC)
                 session.commit()
                 return processed
             except Exception as exc:
@@ -50,7 +50,7 @@ def run_refresh_with_retries(
                 if attempt == max_attempts:
                     audit = session.get(ProspectRefreshRunRecord, audit.id)
                     audit.status = "failed"
-                    audit.completed_at = datetime.utcnow()
+                    audit.completed_at = datetime.now(UTC)
                     audit.error_message = str(exc)[:2000]
                     audit.attempts = attempt
                     session.commit()
