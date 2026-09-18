@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
+from app.db.initialize import seed_reference_data
 from app.db.session import Base, get_db
 from app.main import app
 
@@ -20,6 +21,7 @@ def auth_client():
     )
     Base.metadata.create_all(engine)
     session = Session(engine)
+    seed_reference_data(session)
 
     def override_get_db():
         """Yield the isolated authentication database session."""
@@ -39,6 +41,7 @@ def test_register_and_login_return_access_token(auth_client) -> None:
         "password": "StrongP@ssw0rd!",
         "first_name": "New",
         "last_name": "User",
+        "favorite_team_id": "team-1",
     }
 
     registered = client.post("/auth/register", json=payload)
@@ -58,6 +61,7 @@ def test_duplicate_registration_and_invalid_login_are_rejected(auth_client) -> N
         "password": "StrongP@ssw0rd!",
         "first_name": "Duplicate",
         "last_name": "User",
+        "favorite_team_id": "team-1",
     }
 
     assert client.post("/auth/register", json=payload).status_code == 201
@@ -78,6 +82,7 @@ def test_weak_registration_password_is_rejected(auth_client) -> None:
             "password": "weak-password",
             "first_name": "Weak",
             "last_name": "Password",
+            "favorite_team_id": "team-1",
         },
     )
 
@@ -92,5 +97,73 @@ def test_draft_requires_bearer_auth(auth_client) -> None:
         "/api/drafts",
         json={"controlled_team_id": "team-1", "draft_year": 2026},
     )
+
+    assert response.status_code == 401
+
+
+def test_registration_persists_favorite_team_and_returns_it_on_login(auth_client) -> None:
+    client, _ = auth_client
+    payload = {
+        "email": "fan@example.com",
+        "password": "StrongP@ssw0rd!",
+        "first_name": "Football",
+        "last_name": "Fan",
+        "favorite_team_id": "team-1",
+    }
+
+    registered = client.post("/auth/register", json=payload)
+    logged_in = client.post("/auth/login", json={"email": payload["email"], "password": payload["password"]})
+
+    assert registered.status_code == 201
+    assert registered.json()["favorite_team_id"] == "team-1"
+    assert logged_in.status_code == 200
+    assert logged_in.json()["favorite_team_id"] == "team-1"
+
+
+def test_registration_rejects_unknown_favorite_team(auth_client) -> None:
+    client, _ = auth_client
+
+    response = client.post(
+        "/auth/register",
+        json={
+            "email": "unknown.team@example.com",
+            "password": "StrongP@ssw0rd!",
+            "first_name": "Unknown",
+            "last_name": "Team",
+            "favorite_team_id": "team-missing",
+        },
+    )
+
+    assert response.status_code == 400
+
+
+def test_authenticated_user_can_update_favorite_team(auth_client) -> None:
+    client, _ = auth_client
+    payload = {
+        "email": "preference@example.com",
+        "password": "StrongP@ssw0rd!",
+        "first_name": "Team",
+        "last_name": "Switcher",
+        "favorite_team_id": "team-1",
+    }
+    registered = client.post("/auth/register", json=payload)
+    headers = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+
+    updated = client.patch(
+        "/auth/me/favorite-team",
+        json={"favorite_team_id": "team-2"},
+        headers=headers,
+    )
+    logged_in = client.post("/auth/login", json={"email": payload["email"], "password": payload["password"]})
+
+    assert updated.status_code == 200
+    assert updated.json()["favorite_team_id"] == "team-2"
+    assert logged_in.json()["favorite_team_id"] == "team-2"
+
+
+def test_favorite_team_update_requires_authentication(auth_client) -> None:
+    client, _ = auth_client
+
+    response = client.patch("/auth/me/favorite-team", json={"favorite_team_id": "team-2"})
 
     assert response.status_code == 401

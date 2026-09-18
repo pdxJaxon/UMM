@@ -54,7 +54,7 @@ Stop-ProcessOnPort -Port $BackendPort
 Stop-ProcessOnPort -Port $FrontendPort
 
 $frontendCommand = "`$env:Path = '$nodePath;' + `$env:Path; cd '$frontendPath'; npm start -- --host 0.0.0.0 --port $FrontendPort"
-$backendCommand = "cd '$backendPath'; python -m uvicorn app.main:app --host 127.0.0.1 --port $BackendPort"
+$backendCommand = "`$ErrorActionPreference = 'Stop'; cd '$backendPath'; python -m app.db.initialize; if (`$LASTEXITCODE -ne 0) { exit `$LASTEXITCODE }; python -m uvicorn app.main:app --host 127.0.0.1 --port $BackendPort"
 
 Start-Process powershell -ArgumentList '-NoExit', '-Command', $backendCommand -WorkingDirectory $backendPath
 Start-Process powershell -ArgumentList '-NoExit', '-Command', $frontendCommand -WorkingDirectory $frontendPath

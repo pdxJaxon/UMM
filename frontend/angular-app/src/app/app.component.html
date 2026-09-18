@@ -1,7 +1,7 @@
-<main class="shell">
+<main class="shell" [style.--team-primary]="selectedTeamColors.primary" [style.--team-secondary]="selectedTeamColors.secondary">
   <header class="topbar">
-    <div class="brand"><span class="brand-mark">UM</span><span>UMockMe</span></div>
-    <div class="season">2027 NFL DRAFT <span class="live-dot"></span></div>
+    <div class="brand"><span class="brand-mark">UM</span><span>UMockMe</span><small>Draft room</small></div>
+    <div class="season"><span class="season-label">2027 NFL DRAFT</span><span class="live-dot"></span> LIVE BOARD</div>
     <button class="profile" [attr.aria-label]="isAuthenticated ? 'Sign out' : 'Account controls'" (click)="isAuthenticated && logout()">{{ isAuthenticated ? 'ON' : 'UM' }}</button>
   </header>
 
@@ -9,16 +9,20 @@
     <ng-container *ngIf="!isAuthenticated; else signedIn">
       <div class="account-copy">
         <strong>{{ authMode === 'login' ? 'Continue your board' : 'Create your scouting workspace' }}</strong>
-        <span>{{ authMode === 'login' ? 'Sign in to build and save a personal board.' : 'Use a unique email and an 8-character password.' }}</span>
+        <span>{{ authMode === 'login' ? 'Sign in to build and save a personal board.' : 'Create a private board with a 12-character password.' }}</span>
       </div>
       <div class="account-form">
         <input [(ngModel)]="authEmail" type="email" aria-label="Email" placeholder="Email address">
         <input [(ngModel)]="authPassword" type="password" aria-label="Password" placeholder="Password">
         <ng-container *ngIf="authMode === 'register'">
+          <select [(ngModel)]="favoriteTeamId" aria-label="Favorite team" required [disabled]="teams.length === 0">
+            <option value="" disabled>Favorite team</option>
+            <option *ngFor="let team of teams" [value]="team.id">{{ team.name }}</option>
+                      </select>
           <input [(ngModel)]="authFirstName" type="text" aria-label="First name" placeholder="First name">
           <input [(ngModel)]="authLastName" type="text" aria-label="Last name" placeholder="Last name">
         </ng-container>
-        <button class="action primary" (click)="authMode === 'login' ? login() : register()">{{ authMode === 'login' ? 'Sign in' : 'Create account' }}</button>
+        <button class="action primary" (click)="authMode === 'login' ? login() : register()" [disabled]="authMode === 'register' && !favoriteTeamId">{{ authMode === 'login' ? 'Sign in' : 'Create account' }}</button>
       </div>
       <button class="text-button" (click)="setAuthMode(authMode === 'login' ? 'register' : 'login')">
         {{ authMode === 'login' ? 'New here? Create an account' : 'Already have an account? Sign in' }}
@@ -29,14 +33,33 @@
         <strong>Signed in</strong>
         <span>{{ authMessage ?? 'Your personal board is ready to use.' }}</span>
       </div>
+      <div class="account-preference">
+        <label for="favorite-team">FAVORITE TEAM</label>
+        <select id="favorite-team" [(ngModel)]="favoriteTeamId">
+          <option *ngFor="let team of teams" [value]="team.id">{{ team.name }}</option>
+        </select>
+        <button class="action" (click)="saveFavoriteTeam()" [disabled]="savingFavoriteTeam || !favoriteTeamId || favoriteTeamId === preferredTeamId">
+          {{ savingFavoriteTeam ? 'Saving...' : 'Save team' }}
+        </button>
+        <span *ngIf="favoriteTeamMessage" class="preference-status">{{ favoriteTeamMessage }}</span>
+      </div>
       <button class="action" (click)="logout()">Sign out</button>
     </ng-template>
     <p *ngIf="authMessage && !isAuthenticated" class="feedback">{{ authMessage }}</p>
   </section>
 
   <section class="workspace-header">
+    <div class="team-identity" aria-label="Selected team">
+      <div class="team-logo-wrap">
+        <img *ngIf="selectedTeamLogoUrl" class="team-logo" [src]="selectedTeamLogoUrl" [alt]="selectedTeamName + ' logo'">
+        <span *ngIf="!selectedTeamLogoUrl" class="team-monogram">{{ selectedTeamAbbreviation }}</span>
+      </div>
+      <div>
+        <p class="eyebrow">{{ selectedTeamName }} / 2027 WAR ROOM</p>
+        <span class="team-caption">A living board for draft night decisions</span>
+      </div>
+    </div>
     <div>
-      <p class="eyebrow">TEAM INTELLIGENCE / BIG BOARD</p>
       <h1>Draft board, with receipts.</h1>
       <p class="subhead">Every rank is a conversation between talent, need, tendencies, and evidence.</p>
     </div>
@@ -66,7 +89,10 @@
           <span class="panel-kicker">{{ selectedTeamName }}</span>
           <h2>{{ boardMode === 'default' ? 'Default board' : 'Personal board' }}</h2>
         </div>
-        <span class="count">{{ entries.length }} prospects</span>
+        <div class="panel-summary">
+          <span class="count">{{ entries.length }} prospects</span>
+          <span class="panel-note">Ranked by UMM score</span>
+        </div>
       </div>
 
       <div *ngIf="error" class="api-error">
@@ -77,15 +103,19 @@
       <div *ngIf="loading" class="api-loading">Loading board…</div>
 
       <div class="board-list" *ngIf="!loading && !error">
-        <article class="board-row" *ngFor="let entry of entries; let i = index" [class.selected]="activeEntry?.player_id === entry.player_id" (click)="selectEntry(entry)">
+        <article class="board-row" *ngFor="let entry of entries; let i = index" role="group" [class.selected]="activeEntry?.player_id === entry.player_id" (click)="selectEntry(entry)">
           <span class="rank">{{ entry.rank | number:'2.0-0' }}</span>
-          <div class="prospect">
+          <div class="prospect" role="button" tabindex="0" [attr.aria-label]="'Inspect ' + entry.name" (keydown.enter)="selectEntry(entry)" (keydown.space)="selectEntry(entry); $event.preventDefault()">
             <strong>{{ entry.name }}</strong>
-            <span>{{ entry.position }} · {{ entry.school }}</span>
+            <div class="prospect-meta"><b>{{ entry.position }}</b><span>{{ entry.school }}</span></div>
+          </div>
+          <div class="row-signals" aria-label="Prospect signals">
+            <span>Need <b>{{ entry.need | number:'1.0-0' }}</b></span>
+            <span>Fit <b>{{ entry.fit | number:'1.0-0' }}</b></span>
           </div>
           <span class="score">{{ entry.score | number:'1.1-1' }}<small>UMM</small></span>
-          <button class="move" (click)="$event.stopPropagation(); moveEntry(i, -1)" [disabled]="boardMode !== 'personal' || i === 0">↑</button>
-          <button class="move" (click)="$event.stopPropagation(); moveEntry(i, 1)" [disabled]="boardMode !== 'personal' || i === entries.length - 1">↓</button>
+          <button class="move" title="Move prospect up" aria-label="Move prospect up" (click)="$event.stopPropagation(); moveEntry(i, -1)" [disabled]="boardMode !== 'personal' || i === 0">↑</button>
+            <button class="move" title="Move prospect down" aria-label="Move prospect down" (click)="$event.stopPropagation(); moveEntry(i, 1)" [disabled]="boardMode !== 'personal' || i === entries.length - 1">↓</button>
         </article>
       </div>
     </div>

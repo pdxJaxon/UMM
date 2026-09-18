@@ -1,5 +1,6 @@
 """Database initialization and reference-data seed helpers."""
 
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import Session
 
 from app.db.college_seed import COLLEGES
@@ -86,6 +87,14 @@ PLAYERS = tuple(
 def initialize_schema() -> None:
     """Create all configured tables in the active database."""
     Base.metadata.create_all(bind=engine)
+    if engine.dialect.name == "sqlite":
+        with engine.begin() as connection:
+            columns = {column["name"] for column in inspect(connection).get_columns("users")}
+            if "favorite_team_id" not in columns:
+                connection.execute(
+                    text("ALTER TABLE users ADD COLUMN favorite_team_id VARCHAR(64) REFERENCES teams(id)")
+                )
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_favorite_team_id ON users(favorite_team_id)"))
 
 
 def seed_reference_data(session: Session) -> None:

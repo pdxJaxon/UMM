@@ -8,7 +8,13 @@ from app.models.user import User
 _USERS: dict[str, User] = {}
 
 
-def register_user(email: str, password: str, first_name: str, last_name: str) -> User:
+def register_user(
+    email: str,
+    password: str,
+    first_name: str,
+    last_name: str,
+    favorite_team_id: str | None = None,
+) -> User:
     """Create and persist a new user in memory for the current backend runtime."""
     normalized_email = email.strip().lower()
     if not normalized_email or "@" not in normalized_email:
@@ -24,6 +30,7 @@ def register_user(email: str, password: str, first_name: str, last_name: str) ->
         password_hash=hash_password(password),
         first_name=first_name.strip(),
         last_name=last_name.strip(),
+        favorite_team_id=favorite_team_id,
     )
     _USERS[normalized_email] = user
     return user
