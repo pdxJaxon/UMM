@@ -2,7 +2,7 @@
   display: block;
   min-height: 100vh;
   color: #1d2a2d;
-  background: color-mix(in srgb, var(--team-secondary, #d7dfdb) 8%, #f4f7f3);
+  background: #f4f7f3;
 }
 
 .shell {
@@ -11,6 +11,7 @@
   padding: 0 34px 56px;
   --team-primary: #e65734;
   --team-secondary: #1d2a2d;
+  background: color-mix(in srgb, var(--team-secondary) 8%, #f4f7f3);
 }
 
 .topbar {
