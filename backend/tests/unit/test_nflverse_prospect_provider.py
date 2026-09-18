@@ -21,6 +21,7 @@ def test_nflverse_combine_records_are_normalized() -> None:
         "last_name": "Tackle",
         "position": "OT",
         "college_id": "alabama",
+        "college_name": "Alabama",
         "draft_year": 2027,
         "measurements": {
             "source_name": "nflverse-combine",
@@ -30,3 +31,17 @@ def test_nflverse_combine_records_are_normalized() -> None:
             "raw_payload": {"player_id": "n1", "pos": "OT", "height": 78, "weight": 315, "college_name": "Alabama"},
         },
     }]
+
+
+def test_nflverse_current_combine_schema_is_normalized() -> None:
+    """Current nflverse combine fields should produce usable prospect records."""
+    provider = Mock()
+    provider.load_combine.return_value = [{"pfr_id": "AbcDe00", "player_name": "Jamie Example", "pos": "WR", "ht": "6-2", "school": "Alabama"}]
+    provider.load_players.return_value = []
+
+    record = NflverseProspectProvider(provider).fetch(2026)[0]
+
+    assert record["id"] == "AbcDe00"
+    assert record["first_name"] == "Jamie"
+    assert record["last_name"] == "Example"
+    assert record["measurements"]["height_inches"] == 74

@@ -89,7 +89,7 @@ def initialize_schema() -> None:
 
 
 def seed_reference_data(session: Session) -> None:
-    """Insert idempotent NFL, college, and prospect records for local development."""
+    """Insert idempotent NFL, college, and position reference records."""
     for team_data in TEAMS:
         existing_team = session.get(TeamRecord, team_data["id"])
         if existing_team is None:
@@ -97,13 +97,6 @@ def seed_reference_data(session: Session) -> None:
         else:
             for field, value in team_data.items():
                 setattr(existing_team, field, value)
-    for player_data in PLAYERS:
-        existing_player = session.get(PlayerRecord, player_data["id"])
-        if existing_player is None:
-            session.add(PlayerRecord(**player_data))
-        else:
-            for field, value in player_data.items():
-                setattr(existing_player, field, value)
     for college_data in COLLEGES:
         if session.get(CollegeRecord, college_data["id"]) is None:
             session.add(CollegeRecord(**college_data))
