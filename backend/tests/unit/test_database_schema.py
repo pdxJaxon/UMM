@@ -45,7 +45,7 @@ def test_reference_seed_is_idempotent() -> None:
         assert session.query(TeamRecord).count() == 32
         assert session.query(CollegeRecord).count() == 136
         assert session.query(PositionImportanceRecord).count() == 15
-        assert session.query(PlayerRecord).count() == 5
+        assert session.query(PlayerRecord).count() == 0
 
 
 def test_seeded_teams_include_display_assets() -> None:

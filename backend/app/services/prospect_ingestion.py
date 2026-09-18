@@ -7,7 +7,7 @@ from typing import Any, Protocol
 
 from sqlalchemy.orm import Session
 
-from app.db.models import PlayerAthleticScoreRecord, PlayerMeasurementRecord, PlayerRecord
+from app.db.models import CollegeRecord, PlayerAthleticScoreRecord, PlayerMeasurementRecord, PlayerRecord
 
 
 class ProspectProvider(Protocol):
@@ -38,6 +38,7 @@ class ProspectIngestionService:
     def _upsert_prospect(self, payload: dict[str, Any], draft_year: int, observed_at: datetime) -> None:
         """Update stable profile fields and append new source snapshots."""
         player_id = str(payload["id"])
+        self._ensure_college(payload)
         player = self.session.get(PlayerRecord, player_id)
         if player is None:
             player = PlayerRecord(
@@ -83,3 +84,28 @@ class ProspectIngestionService:
                     raw_payload=score,
                 )
             )
+
+    def _ensure_college(self, payload: dict[str, Any]) -> None:
+        """Create a minimal college reference when a provider introduces a new school."""
+        college_id = str(payload["college_id"])
+        if self.session.get(CollegeRecord, college_id) is not None:
+            return
+        college_name = str(payload.get("college_name") or college_id.replace("-", " ").title())
+        abbreviations = {value for (value,) in self.session.query(CollegeRecord.abbreviation).all()}
+        abbreviation = college_id[:20]
+        suffix = 2
+        while abbreviation in abbreviations:
+            suffix_text = f"-{suffix}"
+            abbreviation = f"{college_id[:20 - len(suffix_text)]}{suffix_text}"
+            suffix += 1
+        self.session.add(
+            CollegeRecord(
+                id=college_id,
+                name=college_name,
+                abbreviation=abbreviation,
+                conference="Unknown",
+                division="FBS",
+                logo_url="",
+                official_url="",
+            )
+        )
