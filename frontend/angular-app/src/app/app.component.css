@@ -2,12 +2,15 @@
   display: block;
   min-height: 100vh;
   color: #1d2a2d;
+  background: color-mix(in srgb, var(--team-secondary, #d7dfdb) 8%, #f4f7f3);
 }
 
 .shell {
   max-width: 1320px;
   margin: auto;
   padding: 0 34px 56px;
+  --team-primary: #e65734;
+  --team-secondary: #1d2a2d;
 }
 
 .topbar {
@@ -20,16 +23,27 @@
 
 .brand {
   display: flex;
+  position: relative;
   gap: 12px;
   align-items: center;
   font-size: 20px;
   font-weight: 800;
 }
 
+.brand small {
+  position: absolute;
+  top: 29px;
+  left: 48px;
+  color: #65716e;
+  font: 700 9px "Courier New", monospace;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+
 .brand-mark {
   padding: 8px 7px;
   color: #fff;
-  background: #e65734;
+  background: var(--team-primary);
   font-size: 13px;
 }
 
@@ -47,6 +61,10 @@ label,
   color: #65716e;
 }
 
+.season-label {
+  color: #1d2a2d;
+}
+
 .live-dot,
 .status-dot {
   display: inline-block;
@@ -54,7 +72,7 @@ label,
   height: 7px;
   margin-left: 7px;
   border-radius: 50%;
-  background: #62a864;
+  background: var(--team-secondary);
 }
 
 .profile {
@@ -109,6 +127,34 @@ label,
   background: #fff;
 }
 
+.account-form select,
+.account-preference select {
+  min-width: 150px;
+  padding: 11px 12px;
+  border: 1px solid #bfcac4;
+  border-radius: 2px;
+  color: #1d2a2d;
+  background: #fff;
+}
+
+.account-preference {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.account-preference label {
+  color: #65716e;
+}
+
+.preference-status {
+  color: var(--team-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
 .action {
   min-height: 42px;
   border: 1px solid #bfcac4;
@@ -120,9 +166,9 @@ label,
 }
 
 .action.primary {
-  border-color: #e65734;
+  border-color: var(--team-primary);
   color: #fff;
-  background: #e65734;
+  background: var(--team-primary);
 }
 
 .action:disabled {
@@ -133,7 +179,7 @@ label,
 .text-button {
   border: 0;
   padding: 6px 0;
-  color: #a3432c;
+  color: var(--team-primary);
   background: transparent;
   font: inherit;
   font-size: 13px;
@@ -145,21 +191,67 @@ label,
 .feedback {
   width: 100%;
   margin: 0;
-  color: #a3432c;
+  color: var(--team-primary);
   font-size: 13px;
 }
 
 .workspace-header {
   display: flex;
+  position: relative;
+  flex-wrap: wrap;
   gap: 30px;
   align-items: end;
   justify-content: space-between;
   padding: 58px 0 38px;
 }
 
+.team-identity {
+  display: flex;
+  flex-basis: 100%;
+  gap: 14px;
+  align-items: center;
+}
+
+.team-logo-wrap {
+  display: grid;
+  width: 86px;
+  height: 86px;
+  flex: 0 0 86px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--team-primary) 35%, transparent);
+  background: color-mix(in srgb, var(--team-secondary) 14%, #fff);
+  box-shadow: 5px 5px 0 var(--team-primary);
+}
+
+.team-logo {
+  width: 68px;
+  height: 68px;
+  object-fit: contain;
+}
+
+.team-monogram {
+  display: grid;
+  width: 54px;
+  height: 54px;
+  place-items: center;
+  color: #fff;
+  background: var(--team-primary);
+  font: 800 15px "Courier New", monospace;
+  letter-spacing: .04em;
+}
+
+.team-identity .eyebrow {
+  margin-bottom: 5px;
+}
+
+.team-caption {
+  color: #65716e;
+  font-size: 13px;
+}
+
 .eyebrow {
   margin: 0 0 12px;
-  color: #e65734;
+  color: var(--team-primary);
 }
 
 .workspace-header h1 {
@@ -178,6 +270,11 @@ label,
   gap: 10px;
   justify-items: end;
   text-align: right;
+}
+
+.board-action .action.primary {
+  min-width: 190px;
+  box-shadow: 4px 4px 0 var(--team-secondary);
 }
 
 .control-strip {
@@ -250,6 +347,18 @@ label,
   border-bottom: 1px solid #d7dfdb;
 }
 
+.panel-summary {
+  display: grid;
+  gap: 5px;
+  justify-items: end;
+  text-align: right;
+}
+
+.panel-note {
+  color: #89938f;
+  font-size: 11px;
+}
+
 .panel-kicker {
   color: #65716e;
   font-size: 13px;
@@ -273,11 +382,11 @@ label,
 
 .board-row:hover,
 .board-row.selected {
-  background: #eef4ef;
+  background: color-mix(in srgb, var(--team-secondary) 9%, #f8faf8);
 }
 
 .rank {
-  color: #e65734;
+  color: var(--team-primary);
   font: 700 14px "Courier New", monospace;
 }
 
@@ -290,6 +399,34 @@ label,
 .player-meta {
   color: #65716e;
   font-size: 13px;
+}
+
+.prospect-meta {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.prospect-meta b {
+  padding: 3px 5px;
+  color: #1d2a2d;
+  background: #e2ebe5;
+  font: 700 10px "Courier New", monospace;
+  letter-spacing: .05em;
+}
+
+.row-signals {
+  display: grid;
+  gap: 4px;
+  color: #65716e;
+  font: 700 10px "Courier New", monospace;
+  text-transform: uppercase;
+}
+
+.row-signals b {
+  color: #1d2a2d;
+  font-size: 12px;
 }
 
 .score {
@@ -327,7 +464,7 @@ label,
 
 .score-hero span {
   display: block;
-  color: #e65734;
+  color: var(--team-primary);
   font: 800 54px Georgia, serif;
 }
 
@@ -362,7 +499,7 @@ label,
 .meter b {
   display: block;
   height: 100%;
-  background: #62a864;
+  background: var(--team-primary);
 }
 
 .source {
@@ -426,6 +563,25 @@ label,
     padding: 38px 0 25px;
   }
 
+  .team-identity {
+    margin-bottom: 26px;
+  }
+
+  .team-logo-wrap {
+    width: 68px;
+    height: 68px;
+    flex-basis: 68px;
+  }
+
+  .team-logo {
+    width: 54px;
+    height: 54px;
+  }
+
+  .brand small {
+    display: none;
+  }
+
   .board-action {
     justify-items: stretch;
     margin-top: 24px;
@@ -457,6 +613,10 @@ label,
   .board-row {
     grid-template-columns: 30px minmax(0, 1fr) 62px 25px 25px;
     padding: 16px 12px;
+  }
+
+  .row-signals {
+    display: none;
   }
 
   .prospect strong {
