@@ -1,4 +1,3 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;800&display=swap');
 * { box-sizing: border-box; }
-html, body { margin: 0; min-height: 100%; background: #eef2ee; font-family: 'DM Sans', sans-serif; }
+html, body { margin: 0; min-height: 100%; background: #eef2ee; font-family: "Trebuchet MS", sans-serif; }
 button, select { font: inherit; cursor: pointer; }

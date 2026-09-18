@@ -73,12 +73,22 @@ Expected result: the system denies access and records an `AuditEvent` entry.
 ## Example commands
 
 ```bash
-# backend
-docker compose up -d postgres
-cd backend
-pip install -r requirements.txt
-pytest
+# install dependencies once
+python -m pip install -r backend/requirements.txt
+cd frontend/angular-app
+npm ci
+cd ../..
 
+# fast pre-PR check: backend smoke tests and frontend production build
+powershell -ExecutionPolicy Bypass -File scripts/test-smoke.ps1
+
+# full regression: all backend tests with coverage and Angular production build
+powershell -ExecutionPolicy Bypass -File scripts/test-regression.ps1
+
+
+The `Smoke tests` check in the repository CI workflow must be configured as a
+required pull request status check in GitHub branch protection. The workflow
+also runs the full regression suite on every pull request and push to `master`.
 # frontend
 dcd frontend/angular-app
 npm install
