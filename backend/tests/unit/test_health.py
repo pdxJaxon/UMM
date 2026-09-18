@@ -11,6 +11,22 @@ def test_health_endpoint_returns_ok() -> None:
 
     assert response.status_code == 200
     assert response.json()["status"] == "ok"
+    assert response.headers["x-content-type-options"] == "nosniff"
+    assert response.headers["x-frame-options"] == "DENY"
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["content-security-policy"] == "default-src 'none'; frame-ancestors 'none'"
+
+
+def test_cors_rejects_untrusted_origin() -> None:
+    response = TestClient(app).options(
+        "/health",
+        headers={
+            "Origin": "https://untrusted.example",
+            "Access-Control-Request-Method": "GET",
+        },
+    )
+
+    assert "access-control-allow-origin" not in response.headers
 
 
 def test_umm_ranking_uses_weighted_average() -> None:

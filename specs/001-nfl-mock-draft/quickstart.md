@@ -89,6 +89,11 @@ powershell -ExecutionPolicy Bypass -File scripts/test-regression.ps1
 The `Smoke tests` check in the repository CI workflow must be configured as a
 required pull request status check in GitHub branch protection. The workflow
 also runs the full regression suite on every pull request and push to `master`.
+
+For production deployments, set `APP_ENV=production`, a randomly generated
+`SECRET_KEY` of at least 32 characters, and an explicit comma-separated
+`CORS_ORIGINS` value containing only trusted HTTPS origins. JWT issuer and
+audience can be customized with `JWT_ISSUER` and `JWT_AUDIENCE`.
 # frontend
 dcd frontend/angular-app
 npm install

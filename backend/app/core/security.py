@@ -5,11 +5,24 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
+import re
 from datetime import datetime, timedelta, timezone
 
 import jwt
 
 from app.core.config import settings
+
+
+def validate_password(password: str) -> None:
+    """Reject passwords that are too short or lack character diversity."""
+    if len(password) > 256:
+        raise ValueError("Password must be no more than 256 characters long")
+    if len(password) < 12:
+        raise ValueError("Password must be at least 12 characters long")
+    if not re.search(r"[a-z]", password) or not re.search(r"[A-Z]", password):
+        raise ValueError("Password must contain upper- and lowercase letters")
+    if not re.search(r"\d", password) or not re.search(r"[^A-Za-z0-9]", password):
+        raise ValueError("Password must contain a number and a special character")
 
 
 def hash_password(password: str) -> str:
@@ -36,6 +49,8 @@ def create_access_token(subject: str) -> str:
     now = datetime.now(timezone.utc)
     claims = {
         "sub": subject,
+        "iss": settings.jwt_issuer,
+        "aud": settings.jwt_audience,
         "iat": now,
         "exp": now + timedelta(minutes=settings.access_token_minutes),
     }
@@ -45,7 +60,13 @@ def create_access_token(subject: str) -> str:
 def decode_access_token(token: str) -> str:
     """Validate a JWT and return its user subject."""
     try:
-        claims = jwt.decode(token, settings.secret_key, algorithms=[settings.jwt_algorithm])
+        claims = jwt.decode(
+            token,
+            settings.secret_key,
+            algorithms=[settings.jwt_algorithm],
+            issuer=settings.jwt_issuer,
+            audience=settings.jwt_audience,
+        )
     except jwt.PyJWTError as exc:
         raise ValueError("Invalid or expired access token") from exc
     subject = claims.get("sub")

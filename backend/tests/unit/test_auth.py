@@ -1,8 +1,10 @@
 """Tests for the account and authentication foundation."""
 
 import pytest
+import jwt
 
-from app.core.security import hash_password, verify_password
+from app.core.config import settings
+from app.core.security import decode_access_token, hash_password, validate_password, verify_password
 from app.services.user_service import authenticate_user, register_user
 
 
@@ -38,3 +40,25 @@ def test_register_and_authenticate_user() -> None:
 
     with pytest.raises(ValueError):
         authenticate_user(email="mock.user@example.com", password="wrong-password")
+
+
+def test_password_policy_requires_complexity() -> None:
+    with pytest.raises(ValueError, match="12 characters"):
+        validate_password("Short1!")
+
+    with pytest.raises(ValueError, match="upper- and lowercase"):
+        validate_password("alllowercase1!")
+
+    with pytest.raises(ValueError, match="number and a special"):
+        validate_password("NoNumberSpecial")
+
+
+def test_access_token_rejects_wrong_audience() -> None:
+    token = jwt.encode(
+        {"sub": "user-1", "iss": settings.jwt_issuer, "aud": "wrong-client"},
+        settings.secret_key,
+        algorithm=settings.jwt_algorithm,
+    )
+
+    with pytest.raises(ValueError, match="Invalid or expired"):
+        decode_access_token(token)

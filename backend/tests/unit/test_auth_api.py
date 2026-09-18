@@ -68,6 +68,22 @@ def test_duplicate_registration_and_invalid_login_are_rejected(auth_client) -> N
     ).status_code == 401
 
 
+def test_weak_registration_password_is_rejected(auth_client) -> None:
+    client, _ = auth_client
+
+    response = client.post(
+        "/auth/register",
+        json={
+            "email": "weak.password@example.com",
+            "password": "weak-password",
+            "first_name": "Weak",
+            "last_name": "Password",
+        },
+    )
+
+    assert response.status_code == 400
+
+
 def test_draft_requires_bearer_auth(auth_client) -> None:
     """Protected draft endpoints must reject anonymous requests."""
     client, _ = auth_client

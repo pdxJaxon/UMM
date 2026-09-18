@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.core.security import hash_password, verify_password
+from app.core.security import hash_password, validate_password, verify_password
 from app.models.user import User
 
 _USERS: dict[str, User] = {}
@@ -13,8 +13,7 @@ def register_user(email: str, password: str, first_name: str, last_name: str) ->
     normalized_email = email.strip().lower()
     if not normalized_email or "@" not in normalized_email:
         raise ValueError("A valid email address is required")
-    if not password or len(password) < 8:
-        raise ValueError("Password must be at least 8 characters long")
+    validate_password(password)
 
     if normalized_email in _USERS:
         raise ValueError("User already exists")
