@@ -36,14 +36,17 @@ class NflverseDraftTradeHistoryProvider:
             selecting_team = _team_value(row, "team_id", "team", "team_abbr", "selecting_team", "to_team")
             if not draft_year or not pick_number or not original_team or not selecting_team or original_team == selecting_team:
                 continue
-            trades.append({
+            trade = {
                 "draft_year": draft_year,
                 "pick_number": pick_number,
                 "moving_up_team": selecting_team,
                 "moving_down_team": original_team,
                 "source_name": self.source_name,
                 "raw_payload": row,
-            })
+            }
+            _copy_actor(row, trade, "general_manager", "gm_id", "general_manager_id", "gm_name", "general_manager_name")
+            _copy_actor(row, trade, "head_coach", "head_coach_id", "head_coach", "head_coach_name", "coach_name")
+            trades.append(trade)
         return trades
 
 
@@ -80,6 +83,10 @@ class DraftTradeHistoryIngestionService:
                     pick_number=payload["pick_number"],
                     moving_up_team_id=moving_up_team_id,
                     moving_down_team_id=moving_down_team_id,
+                    general_manager_id=payload.get("general_manager_id"),
+                    general_manager_name=payload.get("general_manager_name"),
+                    head_coach_id=payload.get("head_coach_id"),
+                    head_coach_name=payload.get("head_coach_name"),
                     source_name=payload["source_name"],
                     observed_at=timestamp,
                     raw_payload=payload["raw_payload"],
@@ -92,11 +99,17 @@ class DraftTradeHistoryIngestionService:
 
     def _refresh_tendencies(self, observed_at: datetime) -> None:
         """Write aggregate direction scores from all persisted historical events."""
-        counts: dict[str, dict[str, int]] = defaultdict(lambda: {"trade_up": 0, "trade_down": 0})
+        counts: dict[tuple[str, str | None, str | None], dict[str, int]] = defaultdict(lambda: {"trade_up": 0, "trade_down": 0})
         for event in self.session.scalars(select(HistoricalDraftTradeRecord)).all():
-            counts[event.moving_up_team_id]["trade_up"] += 1
-            counts[event.moving_down_team_id]["trade_down"] += 1
-        for team_id, directions in counts.items():
+            counts[(event.moving_up_team_id, None, None)]["trade_up"] += 1
+            counts[(event.moving_down_team_id, None, None)]["trade_down"] += 1
+            if event.general_manager_id:
+                counts[(event.moving_up_team_id, "gm", event.general_manager_id)]["trade_up"] += 1
+                counts[(event.moving_down_team_id, "gm", event.general_manager_id)]["trade_down"] += 1
+            if event.head_coach_id:
+                counts[(event.moving_up_team_id, "head_coach", event.head_coach_id)]["trade_up"] += 1
+                counts[(event.moving_down_team_id, "head_coach", event.head_coach_id)]["trade_down"] += 1
+        for (team_id, actor_type, actor_id), directions in counts.items():
             total = directions["trade_up"] + directions["trade_down"]
             for tendency_type, count in directions.items():
                 preference = round(50 + 50 * count / total, 2) if total else 0
@@ -107,12 +120,17 @@ class DraftTradeHistoryIngestionService:
                         TeamDraftingTendencyRecord.draft_year.is_(None),
                         TeamDraftingTendencyRecord.tendency_type == tendency_type,
                         TeamDraftingTendencyRecord.source_name == "historical-trade-analysis",
+                        TeamDraftingTendencyRecord.actor_type == actor_type,
+                        TeamDraftingTendencyRecord.actor_id == actor_id,
                     )
                 )
                 if tendency is None:
                     tendency = TeamDraftingTendencyRecord(
                         team_id=team_id,
                         draft_year=None,
+                        actor_type=actor_type,
+                        actor_id=actor_id,
+                        actor_name=None,
                         tendency_type=tendency_type,
                         preference_score=preference,
                         confidence_score=confidence,
@@ -161,3 +179,16 @@ def _team_value(row: dict[str, Any], *names: str) -> str | None:
         if value not in (None, ""):
             return str(value).strip()
     return None
+
+
+def _copy_actor(
+    row: dict[str, Any],
+    target: dict[str, Any],
+    prefix: str,
+    *names: str,
+) -> None:
+    """Copy an optional identity as a stable ID plus display name."""
+    identifier = _team_value(row, *names[:3])
+    if identifier:
+        target[f"{prefix}_id"] = identifier
+        target[f"{prefix}_name"] = _team_value(row, *names[3:]) or identifier

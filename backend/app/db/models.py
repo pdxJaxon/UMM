@@ -106,6 +106,9 @@ class TeamDraftingTendencyRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
     draft_year = Column(Integer, nullable=True, index=True)
+    actor_type = Column(String(20), nullable=True, index=True)
+    actor_id = Column(String(120), nullable=True, index=True)
+    actor_name = Column(String(150), nullable=True)
     tendency_type = Column(String(40), nullable=False)
     position_code = Column(String(20), nullable=True)
     metric_name = Column(String(60), nullable=True)
@@ -135,9 +138,33 @@ class HistoricalDraftTradeRecord(Base):
     pick_number = Column(Integer, nullable=False)
     moving_up_team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
     moving_down_team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    general_manager_id = Column(String(120), nullable=True, index=True)
+    general_manager_name = Column(String(150), nullable=True)
+    head_coach_id = Column(String(120), nullable=True, index=True)
+    head_coach_name = Column(String(150), nullable=True)
     source_name = Column(String(100), nullable=False)
     source_url = Column(String(500), nullable=True)
     observed_at = Column(DateTime, nullable=False)
+    raw_payload = Column(JSON, nullable=False, default=dict)
+
+
+class TeamLeadershipRecord(Base):
+    """Team-to-leader assignment used to apply regime-specific tendencies."""
+
+    __tablename__ = "team_leadership"
+    __table_args__ = (UniqueConstraint("team_id", "role_type", "person_id", "start_year", name="uq_team_leadership_period"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    role_type = Column(String(20), nullable=False)
+    person_id = Column(String(120), nullable=False, index=True)
+    person_name = Column(String(150), nullable=False)
+    start_year = Column(Integer, nullable=False)
+    end_year = Column(Integer, nullable=True)
+    source_name = Column(String(100), nullable=False)
+    source_url = Column(String(500), nullable=True)
+    observed_at = Column(DateTime, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
     raw_payload = Column(JSON, nullable=False, default=dict)
 
 

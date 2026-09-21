@@ -34,6 +34,7 @@ def test_database_schema_contains_core_tables() -> None:
         "draft_picks",
         "draft_trades",
         "historical_draft_trades",
+        "team_leadership",
     }
 
 

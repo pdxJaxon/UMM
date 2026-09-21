@@ -8,8 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import DraftPickRecord, DraftRunRecord, DraftTradeRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, TeamDraftingTendencyRecord, TeamNeedRecord
+from app.db.models import DraftPickRecord, DraftRunRecord, DraftTradeRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, TeamNeedRecord
 from app.services.llm_prediction import OpenAICompatiblePredictionProvider, PredictionContext, PredictionProvider, predict_pick
+from app.services.leadership_tendencies import get_effective_tendencies
 from app.services.ranking_service import select_with_team_randomness
 from app.services.trade_engine import evaluate_trade
 
@@ -295,26 +296,7 @@ class DraftRepository:
 
     def _team_tendencies(self, team_id: str, draft_year: int) -> list[dict[str, object]]:
         """Load active historical tendencies into model-safe dictionaries."""
-        tendencies = self.session.scalars(
-            select(TeamDraftingTendencyRecord).where(
-                TeamDraftingTendencyRecord.team_id == team_id,
-                TeamDraftingTendencyRecord.is_active.is_(True),
-                (TeamDraftingTendencyRecord.draft_year == draft_year) | (TeamDraftingTendencyRecord.draft_year.is_(None)),
-            )
-        ).all()
-        return [
-            {
-                "tendency_type": tendency.tendency_type,
-                "position_code": tendency.position_code,
-                "preference_score": float(tendency.preference_score),
-                "confidence_score": float(tendency.confidence_score),
-                "sample_size": tendency.sample_size,
-                "source_name": tendency.source_name,
-                "rationale": tendency.rationale,
-                "is_active": tendency.is_active,
-            }
-            for tendency in tendencies
-        ]
+        return get_effective_tendencies(self.session, team_id, draft_year)
 
     @staticmethod
     def _effective_randomness(overall_randomness: float, team_randomness: float) -> float:
