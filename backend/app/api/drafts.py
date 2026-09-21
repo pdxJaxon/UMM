@@ -106,7 +106,7 @@ def predict_current_pick(
                 team_id=payload.team_id,
                 team_name=team.name,
                 draft_year=draft.draft_year,
-                pick_number=payload.pick_number,
+                pick_number=len(draft.picks) + 1,
                 candidates=tuple(payload.candidates),
                 team_needs=tuple(payload.team_needs),
                 team_tendencies=tuple(payload.team_tendencies),
