@@ -14,6 +14,7 @@ from app.services.historical_backtest import (
     NflverseHistoricalDatasetProvider,
     run_historical_backtest,
 )
+from app.jobs.run_historical_backtest import run_pilot
 
 
 def _dataset(year: int = 2024, as_of: date = date(2024, 3, 1)) -> HistoricalDraftDataset:
@@ -143,3 +144,22 @@ def test_nflverse_provider_builds_snapshot_from_prospects_and_actual_picks() -> 
     assert snapshots[0].as_of == date(2024, 3, 1)
     assert snapshots[0].prospects[0]["id"] == "prospect-a"
     assert snapshots[0].actual_picks == {"team-1": ({"pick_number": 1, "player_id": "prospect-a"},)}
+
+
+def test_pilot_returns_accuracy_and_input_coverage() -> None:
+    """The pilot report must expose both results and which historical signals exist."""
+    dataset = _dataset()
+    report = run_pilot([2024], type("Provider", (), {"load": lambda _self, _years: [dataset]})())
+
+    assert report["seasons"] == [2024]
+    assert report["aggregate"]["exact_pick_rate"] == 100.0
+    assert report["coverage"] == [{
+        "draft_year": 2024,
+        "as_of": "2024-03-01",
+        "prospects": 2,
+        "teams_with_actual_picks": 1,
+        "actual_picks": 1,
+        "teams_with_needs": 1,
+        "teams_with_staff": 1,
+        "teams_with_tendencies": 0,
+    }]
