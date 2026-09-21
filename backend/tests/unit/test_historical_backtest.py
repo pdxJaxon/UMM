@@ -2,6 +2,7 @@
 
 from datetime import date
 import json
+from unittest.mock import Mock
 
 import pytest
 
@@ -10,6 +11,7 @@ from app.services.historical_backtest import (
     deterministic_replay_predictor,
     FileHistoricalDraftDatasetProvider,
     HistoricalDraftDataset,
+    NflverseHistoricalDatasetProvider,
     run_historical_backtest,
 )
 
@@ -116,3 +118,28 @@ def test_deterministic_replay_scores_needs_and_removes_selected_players() -> Non
     assert replay["team-1"] == ({"pick_number": 1, "player_id": "qb"},)
     assert replay["team-2"] == ({"pick_number": 2, "player_id": "wr"},)
     assert deterministic_replay_predictor(dataset)(2024, "team-1", dataset) == replay["team-1"]
+
+
+def test_nflverse_provider_builds_snapshot_from_prospects_and_actual_picks() -> None:
+    """The first real-data adapter should preserve source IDs and season boundaries."""
+    provider = Mock()
+    provider.load_combine.return_value = [{
+        "pfr_id": "prospect-a",
+        "player_name": "Example Prospect",
+        "pos": "QB",
+        "school": "Example University",
+    }]
+    provider.load_players.return_value = []
+    provider.load_draft_picks.return_value = [{
+        "season": 2024,
+        "pick": 1,
+        "team": "team-1",
+        "pfr_id": "prospect-a",
+    }]
+
+    snapshots = NflverseHistoricalDatasetProvider(provider).load([2024])
+
+    assert len(snapshots) == 1
+    assert snapshots[0].as_of == date(2024, 3, 1)
+    assert snapshots[0].prospects[0]["id"] == "prospect-a"
+    assert snapshots[0].actual_picks == {"team-1": ({"pick_number": 1, "player_id": "prospect-a"},)}

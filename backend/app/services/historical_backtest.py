@@ -10,6 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from app.services.draft_scoring import DraftScoreWeights, calculate_draft_score
+from app.services.nflverse_prospect_provider import NflverseProspectProvider
+from app.services.nflverse_provider import NflverseProvider
 from app.services.prediction_accuracy import evaluate_prediction_accuracy
 
 
@@ -87,6 +89,41 @@ class FileHistoricalDraftDatasetProvider:
         requested = {int(season) for season in seasons} if seasons is not None else None
         snapshots = [_snapshot_from_record(record) for record in records]
         return [snapshot for snapshot in snapshots if requested is None or snapshot.draft_year in requested]
+
+
+class NflverseHistoricalDatasetProvider:
+    """Build normalized snapshots from nflverse combine and draft-pick data."""
+
+    def __init__(self, provider: NflverseProvider | None = None) -> None:
+        self.provider = provider or NflverseProvider()
+
+    def load(self, seasons: Iterable[int]) -> list[HistoricalDraftDataset]:
+        """Load pre-draft prospects and actual outcomes for each requested season."""
+        years = [int(season) for season in seasons]
+        prospect_provider = NflverseProspectProvider(self.provider)
+        picks_by_year: dict[int, list[dict[str, Any]]] = {year: [] for year in years}
+        for row in _rows(self.provider.load_draft_picks(years)):
+            year = _integer(row, "draft_year", "season", "year")
+            if year in picks_by_year:
+                picks_by_year[year].append(row)
+        datasets = []
+        for year in years:
+            actual_picks: dict[str, list[dict[str, object]]] = {}
+            for row in picks_by_year[year]:
+                team_id = _first_value(row, "team_id", "team", "team_abbr", "posteam")
+                player_id = _first_value(row, "player_id", "gsis_id", "pfr_id", "pfr_player_id")
+                pick_number = _integer(row, "pick_number", "pick", "overall_pick")
+                if team_id and player_id and pick_number:
+                    actual_picks.setdefault(team_id, []).append({"pick_number": pick_number, "player_id": player_id})
+            datasets.append(HistoricalDraftDataset(
+                draft_year=year,
+                as_of=date(year, 3, 1),
+                team_needs={},
+                prospects=tuple(prospect_provider.fetch(year)),
+                team_staff={},
+                actual_picks={team_id: tuple(picks) for team_id, picks in actual_picks.items()},
+            ))
+        return datasets
 
 
 def run_historical_backtest(
@@ -178,6 +215,37 @@ def _records(value: Any) -> list[Mapping[str, object]]:
     if not isinstance(value, list) or any(not isinstance(record, Mapping) for record in value):
         raise ValueError("Historical data collections must contain object records")
     return list(value)
+
+
+def _rows(value: Any) -> list[dict[str, Any]]:
+    """Convert Polars, pandas, or list-like provider output to dictionaries."""
+    if hasattr(value, "iter_rows"):
+        return list(value.iter_rows(named=True))
+    if hasattr(value, "to_dict"):
+        try:
+            return list(value.to_dict(orient="records"))
+        except TypeError:
+            pass
+    return list(value)
+
+
+def _integer(row: Mapping[str, Any], *names: str) -> int | None:
+    """Return the first valid integer field from a provider row."""
+    for name in names:
+        if row.get(name) not in (None, ""):
+            try:
+                return int(row[name])
+            except (TypeError, ValueError):
+                return None
+    return None
+
+
+def _first_value(row: Mapping[str, Any], *names: str) -> str | None:
+    """Return the first non-empty provider value as a stable string."""
+    for name in names:
+        if row.get(name) not in (None, ""):
+            return str(row[name]).strip()
+    return None
 
 
 def _rank_available_candidates(
