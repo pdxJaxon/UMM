@@ -11,6 +11,7 @@ from app.services.historical_backtest import (
     deterministic_replay_predictor,
     FileHistoricalDraftDatasetProvider,
     FileDraftPicksProvider,
+    FileProspectSource,
     HistoricalDraftDataset,
     NflverseHistoricalDatasetProvider,
     run_historical_backtest,
@@ -69,6 +70,31 @@ def test_backtest_rejects_actual_players_missing_from_snapshot() -> None:
 
     with pytest.raises(ValueError, match="missing"):
         run_historical_backtest([invalid], lambda *_: [])
+
+
+def test_backtest_can_report_unmatched_actuals_without_scoring_them() -> None:
+    """Pilot mode should preserve strict validation while supporting partial source coverage."""
+    dataset = _dataset()
+    invalid = HistoricalDraftDataset(
+        draft_year=dataset.draft_year,
+        as_of=dataset.as_of,
+        team_needs=dataset.team_needs,
+        prospects=dataset.prospects,
+        team_staff=dataset.team_staff,
+        actual_picks={"team-1": (
+            {"pick_number": 1, "player_id": "player-a"},
+            {"pick_number": 2, "player_id": "missing"},
+        )},
+    )
+
+    result = run_historical_backtest(
+        [invalid],
+        lambda *_: [{"pick_number": 1, "player_id": "player-a"}],
+        allow_unmatched_actuals=True,
+    )
+
+    assert result.aggregate["unmatched_actuals"] == 1
+    assert result.aggregate["evaluated_picks"] == 1
 
 
 def test_file_provider_loads_and_filters_normalized_snapshots(tmp_path) -> None:
@@ -134,9 +160,10 @@ def test_nflverse_provider_builds_snapshot_from_prospects_and_actual_picks() -> 
     provider.load_players.return_value = []
     provider.load_draft_picks.return_value = [{
         "season": 2024,
+        "round": 1,
         "pick": 1,
         "team": "team-1",
-        "pfr_id": "prospect-a",
+        "pfr_player_id": "prospect-a",
     }]
 
     snapshots = NflverseHistoricalDatasetProvider(provider).load([2024])
@@ -160,6 +187,7 @@ def test_pilot_returns_accuracy_and_input_coverage() -> None:
         "prospects": 2,
         "teams_with_actual_picks": 1,
         "actual_picks": 1,
+        "prospects_missing_from_outcomes": 0,
         "teams_with_needs": 1,
         "teams_with_staff": 1,
         "teams_with_tendencies": 0,
@@ -178,3 +206,17 @@ def test_file_draft_picks_provider_reads_parquet_seasons(tmp_path) -> None:
     rows = FileDraftPicksProvider(path).load_draft_picks([2024])
 
     assert rows == [{"season": 2024, "pick": 1, "team": "team-1", "gsis_id": "player-a"}]
+
+
+def test_file_prospect_source_reads_combine_and_players(tmp_path) -> None:
+    """Local prospect parquet files should replace both network downloads."""
+    polars = pytest.importorskip("polars")
+    combine_path = tmp_path / "combine.parquet"
+    players_path = tmp_path / "players.parquet"
+    polars.DataFrame([{"season": 2024, "pfr_id": "player-a", "player_name": "Example", "pos": "QB"}]).write_parquet(combine_path)
+    polars.DataFrame([{"pfr_id": "player-a", "display_name": "Example", "position": "QB"}]).write_parquet(players_path)
+
+    source = FileProspectSource(combine_path, players_path)
+
+    assert source.load_combine([2024])[0]["pfr_id"] == "player-a"
+    assert source.load_players()[0]["pfr_id"] == "player-a"

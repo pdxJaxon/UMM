@@ -94,14 +94,20 @@ class FileHistoricalDraftDatasetProvider:
 class NflverseHistoricalDatasetProvider:
     """Build normalized snapshots from nflverse combine and draft-pick data."""
 
-    def __init__(self, provider: NflverseProvider | None = None, draft_picks_source: Any | None = None) -> None:
+    def __init__(
+        self,
+        provider: NflverseProvider | None = None,
+        draft_picks_source: Any | None = None,
+        prospect_source: Any | None = None,
+    ) -> None:
         self.provider = provider or NflverseProvider()
         self.draft_picks_source = draft_picks_source or self.provider
+        self.prospect_source = prospect_source or self.provider
 
     def load(self, seasons: Iterable[int]) -> list[HistoricalDraftDataset]:
         """Load pre-draft prospects and actual outcomes for each requested season."""
         years = [int(season) for season in seasons]
-        prospect_provider = NflverseProspectProvider(self.provider)
+        prospect_provider = NflverseProspectProvider(self.prospect_source)
         picks_by_year: dict[int, list[dict[str, Any]]] = {year: [] for year in years}
         for row in _rows(self.draft_picks_source.load_draft_picks(years)):
             year = _integer(row, "draft_year", "season", "year")
@@ -112,9 +118,10 @@ class NflverseHistoricalDatasetProvider:
             actual_picks: dict[str, list[dict[str, object]]] = {}
             for row in picks_by_year[year]:
                 team_id = _first_value(row, "team_id", "team", "team_abbr", "posteam")
-                player_id = _first_value(row, "player_id", "gsis_id", "pfr_id", "pfr_player_id")
+                player_id = _first_value(row, "player_id", "pfr_player_id", "pfr_id", "gsis_id")
                 pick_number = _integer(row, "pick_number", "pick", "overall_pick")
-                if team_id and player_id and pick_number:
+                round_number = _integer(row, "round", "round_number")
+                if team_id and player_id and pick_number and (round_number is None or round_number == 1):
                     actual_picks.setdefault(team_id, []).append({"pick_number": pick_number, "player_id": player_id})
             datasets.append(HistoricalDraftDataset(
                 draft_year=year,
@@ -144,11 +151,38 @@ class FileDraftPicksProvider:
         return [row for row in frame.to_dicts() if _integer(row, "draft_year", "season", "year") in requested]
 
 
+class FileProspectSource:
+    """Load combine and player parquet files for local historical replay."""
+
+    def __init__(self, combine_path: str | Path, players_path: str | Path) -> None:
+        self.combine_path = Path(combine_path)
+        self.players_path = Path(players_path)
+
+    def load_combine(self, seasons: Iterable[int] | None = None) -> list[dict[str, Any]]:
+        """Return combine rows limited to the requested seasons."""
+        rows = self._read(self.combine_path)
+        requested = {int(season) for season in seasons} if seasons is not None else None
+        return [row for row in rows if requested is None or _integer(row, "draft_year", "season", "year") in requested]
+
+    def load_players(self) -> list[dict[str, Any]]:
+        """Return player identity rows from the local parquet file."""
+        return self._read(self.players_path)
+
+    @staticmethod
+    def _read(path: Path) -> list[dict[str, Any]]:
+        try:
+            import polars as pl
+        except ImportError as error:
+            raise RuntimeError("Install polars to load parquet prospect data") from error
+        return pl.read_parquet(path).to_dicts()
+
+
 def run_historical_backtest(
     datasets: Iterable[HistoricalDraftDataset],
     predictor: Predictor,
     *,
     evaluation_scope: str = "first_round",
+    allow_unmatched_actuals: bool = False,
 ) -> BacktestResult:
     """Run a predictor against historical picks without allowing future data.
 
@@ -162,14 +196,17 @@ def run_historical_backtest(
             raise ValueError(f"Dataset for {dataset.draft_year} contains information observed after the draft began")
         prospect_ids = {str(prospect.get("player_id") or prospect.get("id")) for prospect in dataset.prospects}
         for team_id, actual_picks in dataset.actual_picks.items():
-            if any(str(pick["player_id"]) not in prospect_ids for pick in actual_picks):
+            unmatched = [pick for pick in actual_picks if str(pick["player_id"]) not in prospect_ids]
+            if unmatched and not allow_unmatched_actuals:
                 raise ValueError(f"Actual pick for {team_id} references a prospect missing from {dataset.draft_year} snapshot")
             predictions = list(predictor(dataset.draft_year, team_id, dataset))
-            metrics = evaluate_prediction_accuracy(predictions, actual_picks)
+            evaluated_actuals = tuple(pick for pick in actual_picks if pick not in unmatched)
+            metrics = evaluate_prediction_accuracy(predictions, evaluated_actuals)
             team_results.append({
                 "draft_year": dataset.draft_year,
                 "team_id": team_id,
                 "evaluation_scope": evaluation_scope,
+                "unmatched_actuals": len(unmatched),
                 **metrics,
             })
 
@@ -185,6 +222,7 @@ def _aggregate(results: list[dict[str, object]]) -> dict[str, object]:
     evaluated_picks = sum(int(result["evaluated_picks"]) for result in results)
     exact_hits = sum(int(result["exact_hits"]) for result in results)
     player_hits = sum(int(result["player_hits"]) for result in results)
+    unmatched_actuals = sum(int(result["unmatched_actuals"]) for result in results)
     errors = [
         float(result["mean_absolute_pick_error"])
         for result in results
@@ -195,6 +233,7 @@ def _aggregate(results: list[dict[str, object]]) -> dict[str, object]:
         "evaluated_picks": evaluated_picks,
         "exact_hits": exact_hits,
         "player_hits": player_hits,
+        "unmatched_actuals": unmatched_actuals,
         "exact_pick_rate": round(exact_hits / evaluated_picks * 100, 2) if evaluated_picks else 0.0,
         "player_hit_rate": round(player_hits / evaluated_picks * 100, 2) if evaluated_picks else 0.0,
         "mean_absolute_pick_error": round(sum(errors) / len(errors), 2) if errors else None,
