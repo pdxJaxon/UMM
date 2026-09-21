@@ -7,9 +7,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
-from app.db.models import UserRecord
+from app.db.models import TeamRecord, UserRecord
 from app.db.session import get_db
 from app.services.draft_repository import DraftRepository
+from app.services.llm_prediction import OpenAICompatiblePredictionProvider, PredictionContext, predict_pick
 
 router = APIRouter(prefix="/api/drafts", tags=["drafts"])
 
@@ -28,6 +29,16 @@ class SubmitPickRequest(BaseModel):
 
     player_id: str
     team_id: str
+
+
+class PredictPickRequest(BaseModel):
+    """Evidence payload supplied to the model for the current team pick."""
+
+    team_id: str
+    pick_number: int = Field(ge=1)
+    candidates: list[dict[str, object]] = Field(min_length=1)
+    team_needs: list[dict[str, object]] = Field(default_factory=list)
+    team_tendencies: list[dict[str, object]] = Field(default_factory=list)
 
 
 @router.post("", status_code=201)
@@ -70,6 +81,61 @@ def read_draft(
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+
+@router.post("/{draft_id}/prediction")
+def predict_current_pick(
+    draft_id: str,
+    payload: PredictPickRequest,
+    current_user: UserRecord = Depends(get_current_user),
+    session: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Ask the configured frontier model to select one available player."""
+    repository = DraftRepository(session)
+    try:
+        draft = repository.get_owned(draft_id, current_user.id)
+        expected_team_id = repository.current_team_id(len(draft.picks))
+        if payload.team_id != expected_team_id:
+            raise ValueError("Prediction requested for a team that is not on the clock")
+        team = session.get(TeamRecord, payload.team_id)
+        if team is None:
+            raise ValueError("Prediction team does not exist")
+        team_randomness = draft.randomness_overrides.get(payload.team_id, float(team.randomness_score or 50))
+        result = predict_pick(
+            PredictionContext(
+                team_id=payload.team_id,
+                team_name=team.name,
+                draft_year=draft.draft_year,
+                pick_number=payload.pick_number,
+                candidates=tuple(payload.candidates),
+                team_needs=tuple(payload.team_needs),
+                team_tendencies=tuple(payload.team_tendencies),
+                overall_randomness=float(draft.overall_randomness),
+                team_randomness=float(team_randomness),
+            ),
+            OpenAICompatiblePredictionProvider(),
+        )
+        return {
+            "team_id": result.team_id,
+            "pick_number": result.pick_number,
+            "selected_player_id": result.selected_player_id,
+            "confidence": result.confidence,
+            "alternatives": result.alternatives,
+            "reasoning_factors": result.reasoning_factors,
+            "evidence": result.evidence,
+            "provider": result.provider,
+            "model": result.model,
+            "prompt_version": result.prompt_version,
+            "randomness": result.randomness,
+        }
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.post("/{draft_id}/picks", status_code=201)

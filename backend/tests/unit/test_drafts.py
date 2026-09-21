@@ -120,6 +120,35 @@ def test_draft_rejects_out_of_range_overall_randomness() -> None:
     assert response.status_code == 422
 
 
+def test_prediction_endpoint_requires_configured_llm(isolate_draft_store: Session, monkeypatch) -> None:
+    """The prediction endpoint must fail explicitly when no model key is configured."""
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {create_access_token('user-1')}"}
+    draft_id = client.post(
+        "/api/drafts",
+        json={"controlled_team_id": "team-2", "draft_year": 2026, "overall_randomness": 25},
+        headers=headers,
+    ).json()["draft_run_id"]
+
+    class MissingProvider:
+        def __init__(self):
+            raise RuntimeError("LLM_API_KEY is not configured")
+
+    monkeypatch.setattr("app.api.drafts.OpenAICompatiblePredictionProvider", MissingProvider)
+
+    response = client.post(
+        f"/api/drafts/{draft_id}/prediction",
+        json={
+            "team_id": "team-1",
+            "pick_number": 1,
+            "candidates": [{"player_id": "player-1"}],
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 503
+
+
 def test_draft_access_is_limited_to_owner() -> None:
     """A different user must not read another user's draft."""
     client = TestClient(app)
