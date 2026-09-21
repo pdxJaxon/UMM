@@ -7,7 +7,9 @@ import random
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import DraftPickRecord, DraftRunRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord
+from app.core.config import settings
+from app.db.models import DraftPickRecord, DraftRunRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, TeamDraftingTendencyRecord, TeamNeedRecord
+from app.services.llm_prediction import OpenAICompatiblePredictionProvider, PredictionContext, PredictionProvider, predict_pick
 from app.services.ranking_service import select_with_team_randomness
 
 TEAM_ORDER = ("team-1", "team-2", "team-3")
@@ -17,9 +19,12 @@ PLAYER_ORDER = ("player-1", "player-2", "player-3", "player-4", "player-5")
 class DraftRepository:
     """Persist and retrieve draft state using a SQLAlchemy session."""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(self, session: Session, prediction_provider: PredictionProvider | None = None) -> None:
         """Create a repository bound to one request-scoped database session."""
         self.session = session
+        self.prediction_provider = prediction_provider
+        if self.prediction_provider is None and settings.llm_api_key:
+            self.prediction_provider = OpenAICompatiblePredictionProvider()
 
     def create(
         self,
@@ -55,7 +60,15 @@ class DraftRepository:
             raise PermissionError("Draft access denied")
         return draft
 
-    def add_pick(self, draft: DraftRunRecord, team_id: str, player_id: str, source: str, randomness_factor: float = 0) -> DraftPickRecord:
+    def add_pick(
+        self,
+        draft: DraftRunRecord,
+        team_id: str,
+        player_id: str,
+        source: str,
+        randomness_factor: float = 0,
+        prediction_metadata: dict[str, object] | None = None,
+    ) -> DraftPickRecord:
         """Persist a unique pick and enforce the current draft order."""
         picks = self._ordered_picks(draft.id)
         if player_id not in PLAYER_ORDER or self.session.get(PlayerRecord, player_id) is None:
@@ -69,6 +82,7 @@ class DraftRepository:
             id=f"{draft.id}-pick-{pick_number}", draft_run_id=draft.id, pick_number=pick_number,
             round_number=((pick_number - 1) // len(TEAM_ORDER)) + 1, team_id=team_id,
             player_id=player_id, selection_source=source, randomness_factor=randomness_factor,
+            prediction_metadata=prediction_metadata or {},
         )
         self.session.add(pick)
         if pick_number >= len(PLAYER_ORDER):
@@ -94,8 +108,38 @@ class DraftRepository:
                 team_id,
                 self._effective_randomness(draft.overall_randomness, baseline),
             )
-            player_id, applied_randomness = select_with_team_randomness(remaining, randomness, random.Random())
-            self.add_pick(draft, team_id, player_id, "AUTO", applied_randomness)
+            source = "FALLBACK"
+            metadata: dict[str, object] = {"mode": "deterministic-fallback"}
+            if self.prediction_provider is not None:
+                prediction = predict_pick(
+                    PredictionContext(
+                        team_id=team_id,
+                        team_name=team.name if team else team_id,
+                        draft_year=draft.draft_year,
+                        pick_number=len(picks) + 1,
+                        candidates=tuple(self._candidate_context(remaining)),
+                        team_needs=tuple(self._team_needs(team_id, draft.draft_year)),
+                        team_tendencies=tuple(self._team_tendencies(team_id, draft.draft_year)),
+                        overall_randomness=float(draft.overall_randomness),
+                        team_randomness=float(draft.randomness_overrides.get(team_id, team.randomness_score or 50)) if team else 50,
+                    ),
+                    self.prediction_provider,
+                )
+                player_id = prediction.selected_player_id
+                applied_randomness = prediction.randomness
+                source = "LLM"
+                metadata = {
+                    "provider": prediction.provider,
+                    "model": prediction.model,
+                    "prompt_version": prediction.prompt_version,
+                    "confidence": prediction.confidence,
+                    "alternatives": prediction.alternatives,
+                    "reasoning_factors": prediction.reasoning_factors,
+                    "evidence": prediction.evidence,
+                }
+            else:
+                player_id, applied_randomness = select_with_team_randomness(remaining, randomness, random.Random())
+            self.add_pick(draft, team_id, player_id, source, applied_randomness, metadata)
             picks = self._ordered_picks(draft.id)
 
     def state(self, draft: DraftRunRecord) -> dict[str, object]:
@@ -113,7 +157,7 @@ class DraftRepository:
             },
             "current_pick_number": len(picks) + 1,
             "current_team_id": self.current_team_id(len(picks)),
-            "picks": [{"id": p.id, "draft_run_id": p.draft_run_id, "pick_number": p.pick_number, "round_number": p.round_number, "team_id": p.team_id, "player_id": p.player_id, "selection_source": p.selection_source, "randomness_factor": float(p.randomness_factor)} for p in picks],
+            "picks": [{"id": p.id, "draft_run_id": p.draft_run_id, "pick_number": p.pick_number, "round_number": p.round_number, "team_id": p.team_id, "player_id": p.player_id, "selection_source": p.selection_source, "randomness_factor": float(p.randomness_factor), "prediction_metadata": p.prediction_metadata} for p in picks],
         }
 
     @staticmethod
@@ -158,6 +202,40 @@ class DraftRepository:
     def _next_id(self, prefix: str) -> str:
         """Generate a collision-resistant identifier within the current database."""
         return f"{prefix}-{self.session.query(DraftRunRecord).count() + 1}"
+
+    def _candidate_context(self, player_ids: list[str]) -> list[dict[str, object]]:
+        """Build compact, source-backed candidate context for the model."""
+        return [
+            {
+                "player_id": player_id,
+                "position": player.position,
+                "college_id": player.college_id,
+            }
+            for player_id in player_ids
+            if (player := self.session.get(PlayerRecord, player_id)) is not None
+        ]
+
+    def _team_needs(self, team_id: str, draft_year: int) -> list[dict[str, object]]:
+        """Load active needs into model-safe dictionaries."""
+        needs = self.session.scalars(
+            select(TeamNeedRecord).where(
+                TeamNeedRecord.team_id == team_id,
+                TeamNeedRecord.draft_year == draft_year,
+                TeamNeedRecord.is_active.is_(True),
+            )
+        ).all()
+        return [{"position_code": need.position_code, "need_score": float(need.need_score), "source_name": need.source_name} for need in needs]
+
+    def _team_tendencies(self, team_id: str, draft_year: int) -> list[dict[str, object]]:
+        """Load active historical tendencies into model-safe dictionaries."""
+        tendencies = self.session.scalars(
+            select(TeamDraftingTendencyRecord).where(
+                TeamDraftingTendencyRecord.team_id == team_id,
+                TeamDraftingTendencyRecord.is_active.is_(True),
+                (TeamDraftingTendencyRecord.draft_year == draft_year) | (TeamDraftingTendencyRecord.draft_year.is_(None)),
+            )
+        ).all()
+        return [{"tendency_type": tendency.tendency_type, "position_code": tendency.position_code, "preference_score": float(tendency.preference_score), "confidence_score": float(tendency.confidence_score)} for tendency in tendencies]
 
     @staticmethod
     def _effective_randomness(overall_randomness: float, team_randomness: float) -> float:

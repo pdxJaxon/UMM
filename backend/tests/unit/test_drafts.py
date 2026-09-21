@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
 from app.db.initialize import PLAYERS, TEAMS
-from app.db.models import PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, UserRecord
+from app.db.models import DraftPickRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, UserRecord
 from app.db.session import Base, get_db
 from app.main import app
+from app.services.draft_repository import DraftRepository
 
 
 @pytest.fixture(autouse=True)
@@ -79,7 +80,7 @@ def test_controlled_team_flow_auto_simulates_other_teams() -> None:
     state = response.json()
     assert state["current_team_id"] == "team-2"
     assert state["picks"][0]["team_id"] == "team-1"
-    assert state["picks"][0]["selection_source"] == "AUTO"
+    assert state["picks"][0]["selection_source"] == "FALLBACK"
 
     response = client.post(
         f"/api/drafts/{draft_id}/picks",
@@ -147,6 +148,30 @@ def test_prediction_endpoint_requires_configured_llm(isolate_draft_store: Sessio
     )
 
     assert response.status_code == 503
+
+
+def test_auto_simulation_uses_llm_and_persists_provenance(isolate_draft_store: Session) -> None:
+    """Configured model predictions should drive and explain automatic picks."""
+    class FakeProvider:
+        provider_name = "test-provider"
+        model_name = "test-model"
+
+        def complete(self, prompt: str, randomness: float):
+            return {
+                "selected_player_id": "player-2",
+                "confidence": 0.81,
+                "alternatives": [],
+                "reasoning_factors": ["team fit"],
+                "evidence": ["test-evidence"],
+            }
+
+    repository = DraftRepository(isolate_draft_store, FakeProvider())
+    draft = repository.create("user-1", "team-2", 2026, {"team-1": 0}, 25)
+    repository.auto_simulate(draft)
+
+    pick = isolate_draft_store.query(DraftPickRecord).filter_by(draft_run_id=draft.id).one()
+    assert pick.selection_source == "LLM"
+    assert pick.prediction_metadata["model"] == "test-model"
 
 
 def test_draft_access_is_limited_to_owner() -> None:

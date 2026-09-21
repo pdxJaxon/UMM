@@ -331,5 +331,6 @@ class DraftPickRecord(Base):
     player_id = Column(String(64), ForeignKey("players.id"), nullable=False)
     selection_source = Column(String(30), nullable=False)
     randomness_factor = Column(Numeric(5, 2), nullable=False, default=0)
+    prediction_metadata = Column(JSON, nullable=False, default=dict)
     selected_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     draft_run = relationship("DraftRunRecord", back_populates="picks")
