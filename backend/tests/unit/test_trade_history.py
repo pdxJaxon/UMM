@@ -7,9 +7,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.db.initialize import TEAMS
-from app.db.models import HistoricalDraftTradeRecord, TeamDraftingTendencyRecord, TeamRecord
+from app.db.models import HistoricalDraftTradeRecord, TeamDraftingTendencyRecord, TeamLeadershipRecord, TeamRecord
 from app.db.session import Base
-from app.services.trade_history import DraftTradeHistoryIngestionService, NflverseDraftTradeHistoryProvider
+from app.services.trade_history import DraftTradeHistoryIngestionService, FileDraftTradeHistoryProvider, LeadershipIngestionService, NflverseDraftTradeHistoryProvider
 
 
 def test_nflverse_trade_rows_require_explicit_original_owner() -> None:
@@ -59,3 +59,40 @@ def test_refresh_persists_events_and_aggregate_direction_tendencies() -> None:
     assert atlanta_up.confidence_score == 60
     assert arizona_down.sample_size == 2
     assert float(arizona_down.preference_score) == 83.33
+
+
+def test_file_provider_reads_json_and_filters_seasons(tmp_path) -> None:
+    """Normalized JSON exports should be usable without changing the engine."""
+    history_file = tmp_path / "trades.json"
+    history_file.write_text(
+        '[{"season": 2024, "pick": 1, "original_team": "ARI", "team": "ATL"}, '
+        '{"season": 2023, "pick": 2, "original_team": "ARI", "team": "ATL"}]',
+        encoding="utf-8",
+    )
+
+    rows = FileDraftTradeHistoryProvider(history_file).load_draft_picks([2024])
+
+    assert rows == [{"season": 2024, "pick": 1, "original_team": "ARI", "team": "ATL"}]
+
+
+def test_leadership_refresh_maps_team_abbreviations_and_is_idempotent() -> None:
+    """Leadership imports should resolve team abbreviations and avoid duplicates."""
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    session = Session(engine)
+    session.add_all(TeamRecord(**team) for team in TEAMS[:3])
+    session.commit()
+    service = LeadershipIngestionService(session)
+    records = [{
+        "team": "ATL",
+        "role": "General Manager",
+        "person_id": "gm-a",
+        "person_name": "GM A",
+        "start_year": 2025,
+    }]
+
+    assert service.refresh(records) == 1
+    assert service.refresh(records) == 0
+    leadership = session.query(TeamLeadershipRecord).one()
+    assert leadership.team_id == "team-2"
+    assert leadership.role_type == "gm"

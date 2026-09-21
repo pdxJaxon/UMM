@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from collections import defaultdict
+import csv
 from datetime import UTC, datetime
+import json
+from pathlib import Path
 from typing import Any, Protocol
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.models import HistoricalDraftTradeRecord, TeamDraftingTendencyRecord, TeamRecord
+from app.db.models import HistoricalDraftTradeRecord, TeamDraftingTendencyRecord, TeamLeadershipRecord, TeamRecord
 
 
 class DraftTradeHistoryProvider(Protocol):
@@ -48,6 +51,71 @@ class NflverseDraftTradeHistoryProvider:
             _copy_actor(row, trade, "head_coach", "head_coach_id", "head_coach", "head_coach_name", "coach_name")
             trades.append(trade)
         return trades
+
+
+class FileDraftTradeHistoryProvider:
+    """Load normalized draft-pick ownership rows from JSON or CSV."""
+
+    def __init__(self, path: str | Path, source_name: str | None = None) -> None:
+        self.path = Path(path)
+        self.source_name = source_name or f"file:{self.path.name}"
+
+    def load_draft_picks(self, seasons: list[int]) -> list[dict[str, Any]]:
+        """Return file rows limited to the requested draft seasons."""
+        return [
+            row for row in _read_records(self.path)
+            if (_integer(row, "draft_year", "season", "year") in seasons)
+        ]
+
+
+class LeadershipIngestionService:
+    """Upsert normalized team leadership assignments from an external source."""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def refresh(self, records: list[dict[str, Any]], observed_at: datetime | None = None) -> int:
+        """Persist valid leadership periods and return the number of new rows."""
+        timestamp = observed_at or datetime.now(UTC)
+        teams = {
+            value: team.id
+            for team in self.session.scalars(select(TeamRecord)).all()
+            for value in (team.id, team.abbreviation.upper())
+        }
+        processed = 0
+        for row in records:
+            team_id = teams.get(str(row.get("team_id") or row.get("team") or row.get("team_abbr") or "").upper())
+            role_type = _role_type(row.get("role_type") or row.get("role"))
+            person_id = str(row.get("person_id") or row.get("id") or "").strip()
+            person_name = str(row.get("person_name") or row.get("name") or person_id).strip()
+            start_year = _integer(row, "start_year", "from_year")
+            end_year = _integer(row, "end_year", "to_year")
+            if not team_id or role_type not in {"gm", "head_coach"} or not person_id or not start_year:
+                continue
+            existing = self.session.scalar(
+                select(TeamLeadershipRecord).where(
+                    TeamLeadershipRecord.team_id == team_id,
+                    TeamLeadershipRecord.role_type == role_type,
+                    TeamLeadershipRecord.person_id == person_id,
+                    TeamLeadershipRecord.start_year == start_year,
+                )
+            )
+            if existing is None:
+                self.session.add(TeamLeadershipRecord(
+                    team_id=team_id,
+                    role_type=role_type,
+                    person_id=person_id,
+                    person_name=person_name,
+                    start_year=start_year,
+                    end_year=end_year,
+                    source_name=str(row.get("source_name") or "leadership-file"),
+                    source_url=row.get("source_url"),
+                    observed_at=timestamp,
+                    raw_payload=row,
+                ))
+                processed += 1
+        self.session.commit()
+        return processed
 
 
 class DraftTradeHistoryIngestionService:
@@ -181,6 +249,22 @@ def _team_value(row: dict[str, Any], *names: str) -> str | None:
     return None
 
 
+def _read_records(path: Path) -> list[dict[str, Any]]:
+    """Read a JSON array/object or CSV file using structured parsers."""
+    if path.suffix.lower() == ".csv":
+        with path.open(newline="", encoding="utf-8") as handle:
+            return [dict(row) for row in csv.DictReader(handle)]
+    with path.open(encoding="utf-8") as handle:
+        payload = json.load(handle)
+    if isinstance(payload, list):
+        return [dict(row) for row in payload]
+    if isinstance(payload, dict):
+        for key in ("draft_picks", "picks", "trades", "leadership", "records"):
+            if isinstance(payload.get(key), list):
+                return [dict(row) for row in payload[key]]
+    raise ValueError("History file must contain a record array or an object with records")
+
+
 def _copy_actor(
     row: dict[str, Any],
     target: dict[str, Any],
@@ -192,3 +276,15 @@ def _copy_actor(
     if identifier:
         target[f"{prefix}_id"] = identifier
         target[f"{prefix}_name"] = _team_value(row, *names[3:]) or identifier
+
+
+def _role_type(value: Any) -> str:
+    """Normalize common leadership role labels to the canonical role types."""
+    normalized = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+    return {
+        "gm": "gm",
+        "general_manager": "gm",
+        "head_coach": "head_coach",
+        "headcoach": "head_coach",
+        "hc": "head_coach",
+    }.get(normalized, normalized)
