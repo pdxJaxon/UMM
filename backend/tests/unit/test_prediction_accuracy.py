@@ -27,10 +27,14 @@ def test_evaluation_reports_exact_hits_player_hits_and_pick_error() -> None:
 
     assert result == {
         "evaluated_picks": 3,
+        "predicted_picks": 3,
         "exact_hits": 1,
         "player_hits": 2,
+        "wrong_player_picks": 2,
+        "missing_predictions": 0,
         "exact_pick_rate": 33.33,
         "player_hit_rate": 66.67,
+        "selection_error_rate": 66.67,
         "mean_absolute_pick_error": 0.5,
     }
 
@@ -39,9 +43,22 @@ def test_empty_evaluation_has_zero_rates_and_no_error() -> None:
     result = evaluate_prediction_accuracy([], [])
 
     assert result["evaluated_picks"] == 0
+    assert result["predicted_picks"] == 0
     assert result["exact_pick_rate"] == 0.0
     assert result["player_hit_rate"] == 0.0
+    assert result["selection_error_rate"] == 0.0
     assert result["mean_absolute_pick_error"] is None
+
+
+def test_wrong_board_reports_selection_errors_instead_of_zero_error() -> None:
+    result = evaluate_prediction_accuracy(
+        [{"pick_number": 1, "player_id": "wrong"}],
+        [{"pick_number": 1, "player_id": "actual"}],
+    )
+
+    assert result["wrong_player_picks"] == 1
+    assert result["missing_predictions"] == 0
+    assert result["selection_error_rate"] == 100.0
 
 
 def test_record_evaluation_persists_scorecard_metadata() -> None:

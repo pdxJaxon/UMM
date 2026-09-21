@@ -37,6 +37,18 @@ def evaluate_prediction_accuracy(
         if predicted_by_player.get(player_id) == pick_number
     )
     player_hits = sum(1 for _, player_id in actual if player_id in predicted_by_player)
+    predicted_by_pick = {
+        int(prediction["pick_number"]): str(prediction["player_id"])
+        for prediction in predictions
+        if prediction.get("player_id") is not None and prediction.get("pick_number") is not None
+    }
+    predicted_picks = sum(1 for pick_number, _ in actual if pick_number in predicted_by_pick)
+    wrong_player_picks = sum(
+        1
+        for pick_number, player_id in actual
+        if pick_number in predicted_by_pick and predicted_by_pick[pick_number] != player_id
+    )
+    missing_predictions = len(actual) - predicted_picks
     pick_errors = [
         abs(predicted_by_player[player_id] - pick_number)
         for pick_number, player_id in actual
@@ -46,10 +58,14 @@ def evaluate_prediction_accuracy(
 
     return {
         "evaluated_picks": evaluated_picks,
+        "predicted_picks": predicted_picks,
         "exact_hits": exact_hits,
         "player_hits": player_hits,
+        "wrong_player_picks": wrong_player_picks,
+        "missing_predictions": missing_predictions,
         "exact_pick_rate": round(exact_hits / evaluated_picks * 100, 2) if evaluated_picks else 0.0,
         "player_hit_rate": round(player_hits / evaluated_picks * 100, 2) if evaluated_picks else 0.0,
+        "selection_error_rate": round((wrong_player_picks + missing_predictions) / evaluated_picks * 100, 2) if evaluated_picks else 0.0,
         "mean_absolute_pick_error": round(sum(pick_errors) / len(pick_errors), 2) if pick_errors else None,
     }
 
