@@ -8,6 +8,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from app.services.historical_backtest import (
+    FileDraftPicksProvider,
     HistoricalDraftDataset,
     NflverseHistoricalDatasetProvider,
     run_historical_backtest,
@@ -17,10 +18,13 @@ from app.services.historical_backtest import (
 def run_pilot(
     seasons: Iterable[int],
     dataset_provider: Any | None = None,
+    draft_picks_file: str | None = None,
 ) -> dict[str, object]:
     """Load seasons, run deterministic replay, and return metrics plus coverage."""
     years = [int(season) for season in seasons]
-    provider = dataset_provider or NflverseHistoricalDatasetProvider()
+    provider = dataset_provider or NflverseHistoricalDatasetProvider(
+        draft_picks_source=FileDraftPicksProvider(draft_picks_file) if draft_picks_file else None,
+    )
     datasets: list[HistoricalDraftDataset] = provider.load(years)
 
     def predictor(year: int, team_id: str, dataset: HistoricalDraftDataset):
@@ -42,11 +46,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run a deterministic UMockMe historical draft backtest")
     parser.add_argument("--start-season", type=int, required=True)
     parser.add_argument("--end-season", type=int, required=True)
+    parser.add_argument("--draft-picks-file", type=str, help="Local parquet draft-pick outcomes file")
     args = parser.parse_args()
     if args.end_season < args.start_season:
         parser.error("--end-season must be greater than or equal to --start-season")
 
-    report = run_pilot(range(args.start_season, args.end_season + 1))
+    report = run_pilot(range(args.start_season, args.end_season + 1), draft_picks_file=args.draft_picks_file)
     print(json.dumps(report, sort_keys=True))
     return 0
 

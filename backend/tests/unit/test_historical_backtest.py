@@ -10,6 +10,7 @@ from app.services.historical_backtest import (
     build_deterministic_replay,
     deterministic_replay_predictor,
     FileHistoricalDraftDatasetProvider,
+    FileDraftPicksProvider,
     HistoricalDraftDataset,
     NflverseHistoricalDatasetProvider,
     run_historical_backtest,
@@ -163,3 +164,17 @@ def test_pilot_returns_accuracy_and_input_coverage() -> None:
         "teams_with_staff": 1,
         "teams_with_tendencies": 0,
     }]
+
+
+def test_file_draft_picks_provider_reads_parquet_seasons(tmp_path) -> None:
+    """Local parquet outcomes should be available without downloading draft data."""
+    polars = pytest.importorskip("polars")
+    path = tmp_path / "draft_picks.parquet"
+    polars.DataFrame([
+        {"season": 2024, "pick": 1, "team": "team-1", "gsis_id": "player-a"},
+        {"season": 2023, "pick": 1, "team": "team-2", "gsis_id": "player-b"},
+    ]).write_parquet(path)
+
+    rows = FileDraftPicksProvider(path).load_draft_picks([2024])
+
+    assert rows == [{"season": 2024, "pick": 1, "team": "team-1", "gsis_id": "player-a"}]

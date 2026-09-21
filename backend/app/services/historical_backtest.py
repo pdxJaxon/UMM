@@ -94,15 +94,16 @@ class FileHistoricalDraftDatasetProvider:
 class NflverseHistoricalDatasetProvider:
     """Build normalized snapshots from nflverse combine and draft-pick data."""
 
-    def __init__(self, provider: NflverseProvider | None = None) -> None:
+    def __init__(self, provider: NflverseProvider | None = None, draft_picks_source: Any | None = None) -> None:
         self.provider = provider or NflverseProvider()
+        self.draft_picks_source = draft_picks_source or self.provider
 
     def load(self, seasons: Iterable[int]) -> list[HistoricalDraftDataset]:
         """Load pre-draft prospects and actual outcomes for each requested season."""
         years = [int(season) for season in seasons]
         prospect_provider = NflverseProspectProvider(self.provider)
         picks_by_year: dict[int, list[dict[str, Any]]] = {year: [] for year in years}
-        for row in _rows(self.provider.load_draft_picks(years)):
+        for row in _rows(self.draft_picks_source.load_draft_picks(years)):
             year = _integer(row, "draft_year", "season", "year")
             if year in picks_by_year:
                 picks_by_year[year].append(row)
@@ -124,6 +125,23 @@ class NflverseHistoricalDatasetProvider:
                 actual_picks={team_id: tuple(picks) for team_id, picks in actual_picks.items()},
             ))
         return datasets
+
+
+class FileDraftPicksProvider:
+    """Load draft-pick outcomes from a local parquet file."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    def load_draft_picks(self, seasons: Iterable[int]) -> list[dict[str, Any]]:
+        """Return parquet rows limited to the requested seasons."""
+        try:
+            import polars as pl
+        except ImportError as error:
+            raise RuntimeError("Install polars to load parquet draft-pick data") from error
+        frame = pl.read_parquet(self.path)
+        requested = {int(season) for season in seasons}
+        return [row for row in frame.to_dicts() if _integer(row, "draft_year", "season", "year") in requested]
 
 
 def run_historical_backtest(
