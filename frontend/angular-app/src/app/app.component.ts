@@ -121,7 +121,7 @@ export class AppComponent implements OnInit {
     this.http.get<TeamOption[]>(`${this.apiBase}/api/teams`).subscribe({
       next: (teams) => {
         this.teams = teams;
-        if (teams.length > 0) {
+        if (this.isAuthenticated && teams.length > 0) {
           const previousTeamId = this.selectedTeamId;
           this.selectedTeamId = this.preferredTeamId && teams.some((team) => team.id === this.preferredTeamId)
             ? this.preferredTeamId
@@ -150,6 +150,9 @@ export class AppComponent implements OnInit {
   }
 
   protected get selectedTeamColors(): TeamColors {
+    if (!this.isAuthenticated) {
+      return { primary: '#e65734', secondary: '#1d2a2d' };
+    }
     return TEAM_COLORS[this.selectedTeamAbbreviation] ?? { primary: '#e65734', secondary: '#1d2a2d' };
   }
 
@@ -373,6 +376,9 @@ export class AppComponent implements OnInit {
     this.favoriteTeamMessage = null;
     this.favoriteTeamId = '';
     this.preferredTeamId = null;
+    this.selectedTeamId = '';
+    this.entries = [];
+    this.activeEntry = null;
     this.boardId = null;
     this.boardVersion = null;
     this.authMessage = 'Signed out.';
