@@ -124,6 +124,23 @@ class TeamDraftingTendencyRecord(Base):
     team = relationship("TeamRecord", back_populates="drafting_tendencies")
 
 
+class HistoricalDraftTradeRecord(Base):
+    """Historical draft-pick transfer inferred from a source ownership change."""
+
+    __tablename__ = "historical_draft_trades"
+    __table_args__ = (UniqueConstraint("source_name", "draft_year", "pick_number", name="uq_historical_trade_source_pick"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    draft_year = Column(Integer, nullable=False, index=True)
+    pick_number = Column(Integer, nullable=False)
+    moving_up_team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    moving_down_team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    source_name = Column(String(100), nullable=False)
+    source_url = Column(String(500), nullable=True)
+    observed_at = Column(DateTime, nullable=False)
+    raw_payload = Column(JSON, nullable=False, default=dict)
+
+
 class TeamProspectMeetingRecord(Base):
     """Auditable meeting event between an NFL team and draft prospect."""
 
