@@ -1,10 +1,15 @@
 """Tests for leakage-aware historical draft backtesting."""
 
 from datetime import date
+import json
 
 import pytest
 
-from app.services.historical_backtest import HistoricalDraftDataset, run_historical_backtest
+from app.services.historical_backtest import (
+    FileHistoricalDraftDatasetProvider,
+    HistoricalDraftDataset,
+    run_historical_backtest,
+)
 
 
 def _dataset(year: int = 2024, as_of: date = date(2024, 3, 1)) -> HistoricalDraftDataset:
@@ -58,3 +63,30 @@ def test_backtest_rejects_actual_players_missing_from_snapshot() -> None:
 
     with pytest.raises(ValueError, match="missing"):
         run_historical_backtest([invalid], lambda *_: [])
+
+
+def test_file_provider_loads_and_filters_normalized_snapshots(tmp_path) -> None:
+    """A normalized JSON file should feed the same immutable replay contract."""
+    path = tmp_path / "historical-datasets.json"
+    path.write_text(json.dumps({"datasets": [{
+        "draft_year": 2024,
+        "as_of": "2024-03-01",
+        "team_needs": {"team-1": [{"position_code": "QB"}]},
+        "prospects": [{"player_id": "player-a"}],
+        "team_staff": {"team-1": [{"role_type": "gm", "person_id": "gm-a"}]},
+        "actual_picks": {"team-1": [{"pick_number": 1, "player_id": "player-a"}]},
+    }, {
+        "draft_year": 2023,
+        "as_of": "2023-03-01",
+        "team_needs": {},
+        "prospects": [],
+        "team_staff": {},
+        "actual_picks": {},
+    }]}), encoding="utf-8")
+
+    snapshots = FileHistoricalDraftDatasetProvider(path).load([2024])
+
+    assert len(snapshots) == 1
+    assert snapshots[0].draft_year == 2024
+    assert snapshots[0].team_needs["team-1"][0]["position_code"] == "QB"
+    assert isinstance(snapshots[0].actual_picks["team-1"], tuple)
