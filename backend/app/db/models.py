@@ -160,6 +160,27 @@ class ExternalMockPickRecord(Base):
     raw_payload = Column(JSON, nullable=False, default=dict)
 
 
+class PredictionEvaluationRecord(Base):
+    """Immutable accuracy scorecard for one evaluated board version."""
+
+    __tablename__ = "prediction_evaluations"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    board_id = Column(Integer, ForeignKey("team_boards.id"), nullable=True, index=True)
+    draft_year = Column(Integer, nullable=False, index=True)
+    evaluation_scope = Column(String(40), nullable=False, default="first_round")
+    scoring_version = Column(String(50), nullable=False)
+    evaluated_picks = Column(Integer, nullable=False)
+    exact_hits = Column(Integer, nullable=False)
+    player_hits = Column(Integer, nullable=False)
+    exact_pick_rate = Column(Numeric(5, 2), nullable=False)
+    player_hit_rate = Column(Numeric(5, 2), nullable=False)
+    mean_absolute_pick_error = Column(Numeric(8, 2), nullable=True)
+    evaluated_at = Column(DateTime, nullable=False)
+    source_name = Column(String(100), nullable=False)
+
+
 class ProspectRefreshRunRecord(Base):
     """Audit record for one scheduled or manually triggered prospect refresh."""
 

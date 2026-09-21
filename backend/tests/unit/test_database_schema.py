@@ -22,6 +22,7 @@ def test_database_schema_contains_core_tables() -> None:
         "team_drafting_tendencies",
         "team_prospect_meetings",
         "external_mock_picks",
+        "prediction_evaluations",
         "prospect_refresh_runs",
         "team_boards",
         "team_board_entries",
