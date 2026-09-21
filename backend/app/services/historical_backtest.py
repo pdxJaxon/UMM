@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date
 import json
 from pathlib import Path
 from typing import Any
 
+from app.services.draft_scoring import DraftScoreWeights, calculate_draft_score
 from app.services.prediction_accuracy import evaluate_prediction_accuracy
 
 
@@ -22,6 +23,7 @@ class HistoricalDraftDataset:
     prospects: tuple[Mapping[str, object], ...]
     team_staff: Mapping[str, tuple[Mapping[str, object], ...]]
     actual_picks: Mapping[str, tuple[Mapping[str, object], ...]]
+    team_tendencies: Mapping[str, tuple[Mapping[str, object], ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -34,6 +36,37 @@ class BacktestResult:
 
 
 Predictor = Callable[[int, str, HistoricalDraftDataset], Iterable[Mapping[str, object]]]
+
+
+def build_deterministic_replay(
+    dataset: HistoricalDraftDataset,
+    weights: DraftScoreWeights | None = None,
+) -> dict[str, tuple[dict[str, object], ...]]:
+    """Replay historical pick order using only the supplied pre-draft snapshot."""
+    candidates = [dict(prospect) for prospect in dataset.prospects]
+    selected: set[str] = set()
+    predictions: dict[str, list[dict[str, object]]] = {team_id: [] for team_id in dataset.actual_picks}
+    events = sorted(
+        ((int(pick["pick_number"]), team_id, pick) for team_id, picks in dataset.actual_picks.items() for pick in picks),
+        key=lambda event: event[0],
+    )
+    for pick_number, team_id, _actual_pick in events:
+        ranked = _rank_available_candidates(dataset, team_id, pick_number, candidates, selected, weights)
+        if not ranked:
+            continue
+        selected_player_id = str(ranked[0]["player_id"])
+        predictions[team_id].append({"pick_number": pick_number, "player_id": selected_player_id})
+        selected.add(selected_player_id)
+    return {team_id: tuple(team_predictions) for team_id, team_predictions in predictions.items()}
+
+
+def deterministic_replay_predictor(
+    dataset: HistoricalDraftDataset,
+    weights: DraftScoreWeights | None = None,
+) -> Predictor:
+    """Create a backtest predictor backed by one deterministic historical replay."""
+    replay = build_deterministic_replay(dataset, weights)
+    return lambda _draft_year, team_id, _dataset: replay.get(team_id, ())
 
 
 class FileHistoricalDraftDatasetProvider:
@@ -129,6 +162,7 @@ def _snapshot_from_record(record: Any) -> HistoricalDraftDataset:
         prospects=tuple(_records(record.get("prospects", []))),
         team_staff=_team_records(record.get("team_staff", {})),
         actual_picks=_team_records(record.get("actual_picks", {})),
+        team_tendencies=_team_records(record.get("team_tendencies", {})),
     )
 
 
@@ -144,3 +178,35 @@ def _records(value: Any) -> list[Mapping[str, object]]:
     if not isinstance(value, list) or any(not isinstance(record, Mapping) for record in value):
         raise ValueError("Historical data collections must contain object records")
     return list(value)
+
+
+def _rank_available_candidates(
+    dataset: HistoricalDraftDataset,
+    team_id: str,
+    pick_number: int,
+    candidates: list[dict[str, object]],
+    selected: set[str],
+    weights: DraftScoreWeights | None,
+) -> list[dict[str, object]]:
+    """Score and rank available snapshot candidates for one historical pick."""
+    ranked: list[tuple[dict[str, object], float]] = []
+    for candidate in candidates:
+        player_id = str(candidate.get("player_id") or candidate.get("id") or "")
+        if not player_id or player_id in selected:
+            continue
+        candidate["id"] = player_id
+        breakdown = calculate_draft_score(
+            player=candidate,
+            team_id=team_id,
+            pick_number=pick_number,
+            team_needs=dataset.team_needs.get(team_id, ()),
+            tendencies=dataset.team_tendencies.get(team_id, ()),
+            meetings=candidate.get("meetings", ()),
+            external_picks=candidate.get("external_picks", ()),
+            concerns=candidate.get("concerns", ()),
+            ranking_values=candidate.get("ranking_values", {}),
+            weights=weights,
+        )
+        ranked.append(({"player_id": player_id, "score": breakdown.final_score}, breakdown.final_score))
+    ranked.sort(key=lambda item: (-item[1], item[0]["player_id"]))
+    return [candidate for candidate, _score in ranked]

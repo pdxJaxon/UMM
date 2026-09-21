@@ -6,6 +6,8 @@ import json
 import pytest
 
 from app.services.historical_backtest import (
+    build_deterministic_replay,
+    deterministic_replay_predictor,
     FileHistoricalDraftDatasetProvider,
     HistoricalDraftDataset,
     run_historical_backtest,
@@ -90,3 +92,27 @@ def test_file_provider_loads_and_filters_normalized_snapshots(tmp_path) -> None:
     assert snapshots[0].draft_year == 2024
     assert snapshots[0].team_needs["team-1"][0]["position_code"] == "QB"
     assert isinstance(snapshots[0].actual_picks["team-1"], tuple)
+
+
+def test_deterministic_replay_scores_needs_and_removes_selected_players() -> None:
+    """Replay should use team needs and never select the same player twice."""
+    dataset = HistoricalDraftDataset(
+        draft_year=2024,
+        as_of=date(2024, 3, 1),
+        team_needs={"team-1": ({"position_code": "QB", "need_score": 100},), "team-2": ()},
+        prospects=(
+            {"player_id": "wr", "position": "WR", "ranking_values": {"overall": 100}},
+            {"player_id": "qb", "position": "QB", "ranking_values": {"overall": 90}},
+        ),
+        team_staff={},
+        actual_picks={
+            "team-1": ({"pick_number": 1, "player_id": "qb"},),
+            "team-2": ({"pick_number": 2, "player_id": "wr"},),
+        },
+    )
+
+    replay = build_deterministic_replay(dataset)
+
+    assert replay["team-1"] == ({"pick_number": 1, "player_id": "qb"},)
+    assert replay["team-2"] == ({"pick_number": 2, "player_id": "wr"},)
+    assert deterministic_replay_predictor(dataset)(2024, "team-1", dataset) == replay["team-1"]
