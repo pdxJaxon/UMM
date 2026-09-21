@@ -10,9 +10,10 @@ from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
 from app.db.initialize import PLAYERS, TEAMS
-from app.db.models import PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, UserRecord
+from app.db.models import DraftPickRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamDraftingTendencyRecord, TeamRecord, UserRecord
 from app.db.session import Base, get_db
 from app.main import app
+from app.services.draft_repository import DraftRepository
 
 
 @pytest.fixture(autouse=True)
@@ -79,7 +80,7 @@ def test_controlled_team_flow_auto_simulates_other_teams() -> None:
     state = response.json()
     assert state["current_team_id"] == "team-2"
     assert state["picks"][0]["team_id"] == "team-1"
-    assert state["picks"][0]["selection_source"] == "AUTO"
+    assert state["picks"][0]["selection_source"] == "FALLBACK"
 
     response = client.post(
         f"/api/drafts/{draft_id}/picks",
@@ -88,6 +89,122 @@ def test_controlled_team_flow_auto_simulates_other_teams() -> None:
     )
     assert response.status_code == 201
     assert response.json()["picks"][1]["selection_source"] == "USER"
+
+
+def test_auto_simulation_executes_historic_trade_and_stops_for_controlled_team(isolate_draft_store: Session) -> None:
+    """A strong trade-down and trade-up history should change the order before a pick."""
+    observed_at = datetime.now(UTC)
+    isolate_draft_store.add_all([
+        TeamDraftingTendencyRecord(
+            team_id="team-1", draft_year=None, tendency_type="trade_down",
+            preference_score=100, confidence_score=100, sample_size=5,
+            source_name="historical-drafts", rationale="Frequently accumulates extra picks",
+            observed_at=observed_at,
+        ),
+        TeamDraftingTendencyRecord(
+            team_id="team-2", draft_year=None, tendency_type="trade_up",
+            preference_score=100, confidence_score=100, sample_size=4,
+            source_name="historical-drafts", rationale="Frequently consolidates picks",
+            observed_at=observed_at,
+        ),
+    ])
+    isolate_draft_store.commit()
+
+    repository = DraftRepository(isolate_draft_store)
+    draft = repository.create("user-1", "team-2", 2026)
+    repository.auto_simulate(draft)
+
+    state = repository.state(draft)
+    assert state["current_team_id"] == "team-2"
+    assert state["picks"] == []
+    assert state["draft_run"]["draft_order"] == ["team-2", "team-1", "team-3"]
+    assert len(state["trades"]) == 1
+    assert state["trades"][0]["moving_up_team_id"] == "team-2"
+    assert state["trades"][0]["moving_down_team_id"] == "team-1"
+    assert state["trades"][0]["value_delta"] > 0
+
+
+def test_draft_state_reports_overall_randomness_setting() -> None:
+    """A draft run should preserve the user's global randomness baseline."""
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {create_access_token('user-1')}"}
+
+    response = client.post(
+        "/api/drafts",
+        json={"controlled_team_id": "team-1", "draft_year": 2026, "overall_randomness": 25},
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    state = client.get(f"/api/drafts/{response.json()['draft_run_id']}", headers=headers)
+    assert state.json()["draft_run"]["overall_randomness"] == 25
+
+
+def test_draft_rejects_out_of_range_overall_randomness() -> None:
+    """Global randomness must remain within the documented 0-100 range."""
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {create_access_token('user-1')}"}
+
+    response = client.post(
+        "/api/drafts",
+        json={"controlled_team_id": "team-1", "draft_year": 2026, "overall_randomness": 101},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
+def test_prediction_endpoint_requires_configured_llm(isolate_draft_store: Session, monkeypatch) -> None:
+    """The prediction endpoint must fail explicitly when no model key is configured."""
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {create_access_token('user-1')}"}
+    draft_id = client.post(
+        "/api/drafts",
+        json={"controlled_team_id": "team-2", "draft_year": 2026, "overall_randomness": 25},
+        headers=headers,
+    ).json()["draft_run_id"]
+
+    class MissingProvider:
+        def __init__(self):
+            raise RuntimeError("LLM_API_KEY is not configured")
+
+    monkeypatch.setattr("app.api.drafts.OpenAICompatiblePredictionProvider", MissingProvider)
+
+    response = client.post(
+        f"/api/drafts/{draft_id}/prediction",
+        json={
+            "team_id": "team-1",
+            "pick_number": 1,
+            "candidates": [{"player_id": "player-1"}],
+        },
+        headers=headers,
+    )
+
+    assert response.status_code == 503
+
+
+def test_auto_simulation_uses_llm_and_persists_provenance(isolate_draft_store: Session) -> None:
+    """Configured model predictions should drive and explain automatic picks."""
+    class FakeProvider:
+        provider_name = "test-provider"
+        model_name = "test-model"
+
+        def complete(self, prompt: str, randomness: float):
+            return {
+                "selected_player_id": "player-2",
+                "confidence": 0.81,
+                "alternatives": [],
+                "reasoning_factors": ["team fit"],
+                "evidence": ["test-evidence"],
+            }
+
+    repository = DraftRepository(isolate_draft_store, FakeProvider())
+    draft = repository.create("user-1", "team-2", 2026, {"team-1": 0}, 25)
+    repository.auto_simulate(draft)
+
+    pick = isolate_draft_store.query(DraftPickRecord).filter_by(draft_run_id=draft.id).one()
+    assert pick.selection_source == "LLM"
+    assert pick.prediction_metadata["model"] == "test-model"
 
 
 def test_draft_access_is_limited_to_owner() -> None:

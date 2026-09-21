@@ -29,6 +29,11 @@ class Settings:
     pff_api_key: str = ""
     pff_request_timeout_seconds: float = 30.0
     pff_big_board_url: str = "https://www.pff.com/draft/big-board"
+    llm_api_url: str = "https://api.openai.com/v1/chat/completions"
+    llm_api_key: str = ""
+    llm_model: str = "gpt-5"
+    llm_request_timeout_seconds: float = 45.0
+    llm_prompt_version: str = "umm-pick-v1"
 
     @classmethod
     def from_environment(cls) -> "Settings":
@@ -57,6 +62,13 @@ class Settings:
                 os.getenv("PFF_REQUEST_TIMEOUT_SECONDS", str(cls.pff_request_timeout_seconds))
             ),
             pff_big_board_url=os.getenv("PFF_BIG_BOARD_URL", cls.pff_big_board_url),
+            llm_api_url=os.getenv("LLM_API_URL", cls.llm_api_url),
+            llm_api_key=os.getenv("LLM_API_KEY", cls.llm_api_key),
+            llm_model=os.getenv("LLM_MODEL", cls.llm_model),
+            llm_request_timeout_seconds=float(
+                os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", str(cls.llm_request_timeout_seconds))
+            ),
+            llm_prompt_version=os.getenv("LLM_PROMPT_VERSION", cls.llm_prompt_version),
         )
 
 

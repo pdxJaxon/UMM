@@ -48,94 +48,135 @@
     <p *ngIf="authMessage && !isAuthenticated" class="feedback">{{ authMessage }}</p>
   </section>
 
-  <section class="workspace-header">
-    <div class="team-identity" aria-label="Selected team">
-      <div class="team-logo-wrap">
-        <img *ngIf="selectedTeamLogoUrl" class="team-logo" [src]="selectedTeamLogoUrl" [alt]="selectedTeamName + ' logo'">
-        <span *ngIf="!selectedTeamLogoUrl" class="team-monogram">{{ selectedTeamAbbreviation }}</span>
+  <ng-container *ngIf="isAuthenticated; else guestWorkspace">
+    <section class="workspace-header">
+      <div class="team-identity" aria-label="Selected team">
+        <div class="team-logo-wrap">
+          <img *ngIf="selectedTeamLogoUrl" class="team-logo" [src]="selectedTeamLogoUrl" [alt]="selectedTeamName + ' logo'">
+          <span *ngIf="!selectedTeamLogoUrl" class="team-monogram">{{ selectedTeamAbbreviation }}</span>
+        </div>
+        <div>
+          <p class="eyebrow">{{ selectedTeamName }} / 2027 WAR ROOM</p>
+          <span class="team-caption">A living board for draft night decisions</span>
+        </div>
       </div>
       <div>
-        <p class="eyebrow">{{ selectedTeamName }} / 2027 WAR ROOM</p>
-        <span class="team-caption">A living board for draft night decisions</span>
+        <h1>Draft board, with receipts.</h1>
+        <p class="subhead">Every rank is a conversation between talent, need, tendencies, and evidence.</p>
       </div>
-    </div>
-    <div>
-      <h1>Draft board, with receipts.</h1>
-      <p class="subhead">Every rank is a conversation between talent, need, tendencies, and evidence.</p>
-    </div>
-    <div class="board-action">
-      <span>{{ boardMode === 'personal' ? 'Reorder with the arrows, then save.' : 'Start with the team model, then make it yours.' }}</span>
-      <button class="action primary" (click)="completeBoardAction()" [disabled]="!boardActionEnabled">{{ boardActionLabel }}</button>
-    </div>
-  </section>
-
-  <section class="control-strip" aria-label="Board controls">
-    <label>TEAM
-      <select [(ngModel)]="selectedTeamId" (ngModelChange)="onTeamChange()">
-        <option *ngFor="let team of teams" [value]="team.id">{{ team.name }}</option>
-      </select>
-    </label>
-    <div class="segmented">
-      <button [class.active]="boardMode === 'default'" (click)="setBoardMode('default')">Default board</button>
-      <button [class.active]="boardMode === 'personal'" (click)="setBoardMode('personal')">My board</button>
-    </div>
-    <span class="status"><span class="status-dot"></span> {{ syncLabel }}</span>
-  </section>
-
-  <section class="board-layout">
-    <div class="board-panel">
-      <div class="panel-heading">
-        <div>
-          <span class="panel-kicker">{{ selectedTeamName }}</span>
-          <h2>{{ boardMode === 'default' ? 'Default board' : 'Personal board' }}</h2>
-        </div>
-        <div class="panel-summary">
-          <span class="count">{{ entries.length }} prospects</span>
-          <span class="panel-note">Ranked by UMM score</span>
-        </div>
+      <div class="board-action">
+        <span>{{ boardMode === 'personal' ? 'Reorder with the arrows, then save.' : 'Start with the team model, then make it yours.' }}</span>
+        <button class="action primary" (click)="completeBoardAction()" [disabled]="!boardActionEnabled">{{ boardActionLabel }}</button>
       </div>
+    </section>
 
-      <div *ngIf="error" class="api-error">
-        <span>{{ error }}</span>
-        <button *ngIf="boardMode === 'default' && isAuthenticated" class="text-button" (click)="generateBoard()">Generate board</button>
-        <button *ngIf="boardMode === 'personal' && isAuthenticated" class="text-button" (click)="setBoardMode('default')">View default board</button>
+    <section class="control-strip" aria-label="Board controls">
+      <label>TEAM
+        <select [(ngModel)]="selectedTeamId" (ngModelChange)="onTeamChange()">
+          <option *ngFor="let team of teams" [value]="team.id">{{ team.name }}</option>
+        </select>
+      </label>
+      <div class="segmented">
+        <button [class.active]="boardMode === 'default'" (click)="setBoardMode('default')">Default board</button>
+        <button [class.active]="boardMode === 'personal'" (click)="setBoardMode('personal')">My board</button>
       </div>
-      <div *ngIf="loading" class="api-loading">Loading board…</div>
+      <span class="status"><span class="status-dot"></span> {{ syncLabel }}</span>
+    </section>
 
-      <div class="board-list" *ngIf="!loading && !error">
-        <article class="board-row" *ngFor="let entry of entries; let i = index" role="group" [class.selected]="activeEntry?.player_id === entry.player_id" (click)="selectEntry(entry)">
-          <span class="rank">{{ entry.rank | number:'2.0-0' }}</span>
-          <div class="prospect" role="button" tabindex="0" [attr.aria-label]="'Inspect ' + entry.name" (keydown.enter)="selectEntry(entry)" (keydown.space)="selectEntry(entry); $event.preventDefault()">
-            <strong>{{ entry.name }}</strong>
-            <div class="prospect-meta"><b>{{ entry.position }}</b><span>{{ entry.school }}</span></div>
+    <section class="randomness-panel" aria-label="Mock draft randomness settings">
+      <div class="randomness-heading">
+        <p class="eyebrow">PREDICTION SETTINGS</p>
+        <h2>Let the model feel the room.</h2>
+        <p>Set the league-wide chaos level, then tune {{ selectedTeamName }} independently.</p>
+      </div>
+      <label class="range-control">
+        <span><b>Overall randomness</b><strong>{{ overallRandomness }}%</strong></span>
+        <input type="range" min="0" max="100" step="1" [(ngModel)]="overallRandomness">
+        <small>0 = chalk picks · 100 = wide-open outcomes</small>
+      </label>
+      <label class="range-control">
+        <span><b>{{ selectedTeamName }} tendency</b><strong>{{ selectedTeamRandomness }}%</strong></span>
+        <input type="range" min="0" max="100" step="1" [ngModel]="selectedTeamRandomness" (ngModelChange)="setSelectedTeamRandomness($event)">
+        <small>Team profile plus your override for this mock draft</small>
+      </label>
+      <div class="randomness-action">
+        <button class="action primary" (click)="startMockDraft()" [disabled]="startingDraft || !selectedTeamId">
+          {{ startingDraft ? 'Starting...' : 'Start mock draft' }}
+        </button>
+        <span *ngIf="draftRunMessage" class="preference-status">{{ draftRunMessage }}</span>
+      </div>
+    </section>
+
+    <section class="board-layout">
+      <div class="board-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="panel-kicker">{{ selectedTeamName }}</span>
+            <h2>{{ boardMode === 'default' ? 'Default board' : 'Personal board' }}</h2>
           </div>
-          <div class="row-signals" aria-label="Prospect signals">
-            <span>Need <b>{{ entry.need | number:'1.0-0' }}</b></span>
-            <span>Fit <b>{{ entry.fit | number:'1.0-0' }}</b></span>
+          <div class="panel-summary">
+            <span class="count">{{ entries.length }} prospects</span>
+            <span class="panel-note">Ranked by UMM score</span>
           </div>
-          <span class="score">{{ entry.score | number:'1.1-1' }}<small>UMM</small></span>
-          <button class="move" title="Move prospect up" aria-label="Move prospect up" (click)="$event.stopPropagation(); moveEntry(i, -1)" [disabled]="boardMode !== 'personal' || i === 0">↑</button>
+        </div>
+
+        <div *ngIf="error" class="api-error">
+          <span>{{ error }}</span>
+          <button *ngIf="boardMode === 'default' && isAuthenticated" class="text-button" (click)="generateBoard()">Generate board</button>
+          <button *ngIf="boardMode === 'personal' && isAuthenticated" class="text-button" (click)="setBoardMode('default')">View default board</button>
+        </div>
+        <div *ngIf="loading" class="api-loading">Loading board…</div>
+
+        <div class="board-list" *ngIf="!loading && !error">
+          <article class="board-row" *ngFor="let entry of entries; let i = index" role="group" [class.selected]="activeEntry?.player_id === entry.player_id" (click)="selectEntry(entry)">
+            <span class="rank">{{ entry.rank | number:'2.0-0' }}</span>
+            <div class="prospect" role="button" tabindex="0" [attr.aria-label]="'Inspect ' + entry.name" (keydown.enter)="selectEntry(entry)" (keydown.space)="selectEntry(entry); $event.preventDefault()">
+              <strong>{{ entry.name }}</strong>
+              <div class="prospect-meta"><b>{{ entry.position }}</b><span>{{ entry.school }}</span></div>
+            </div>
+            <div class="row-signals" aria-label="Prospect signals">
+              <span>Need <b>{{ entry.need | number:'1.0-0' }}</b></span>
+              <span>Fit <b>{{ entry.fit | number:'1.0-0' }}</b></span>
+            </div>
+            <span class="score">{{ entry.score | number:'1.1-1' }}<small>UMM</small></span>
+            <button class="move" title="Move prospect up" aria-label="Move prospect up" (click)="$event.stopPropagation(); moveEntry(i, -1)" [disabled]="boardMode !== 'personal' || i === 0">↑</button>
             <button class="move" title="Move prospect down" aria-label="Move prospect down" (click)="$event.stopPropagation(); moveEntry(i, 1)" [disabled]="boardMode !== 'personal' || i === entries.length - 1">↓</button>
-        </article>
+          </article>
+        </div>
       </div>
-    </div>
 
-    <aside class="evidence-panel" *ngIf="activeEntry as entry; else emptyEvidence">
-      <p class="eyebrow">RANK {{ entry.rank | number:'2.0-0' }} / EXPLANATION</p>
-      <h2>{{ entry.name }}</h2>
-      <p class="player-meta">{{ entry.position }} · {{ entry.school }}</p>
-      <div class="score-hero"><span>{{ entry.score | number:'1.1-1' }}</span><small>UMM SCORE</small></div>
-      <div class="signal"><span>Team need</span><strong>{{ entry.need }}<i>%</i></strong><div class="meter"><b [style.width.%]="entry.need"></b></div></div>
-      <div class="signal"><span>Team fit</span><strong>{{ entry.fit }}<i>%</i></strong><div class="meter"><b [style.width.%]="entry.fit"></b></div></div>
-      <p class="source">Evidence: {{ entry.source }}</p>
-    </aside>
-
-    <ng-template #emptyEvidence>
-      <aside class="evidence-panel empty">
-        <span class="empty-icon">+</span>
-        <h2>Choose a prospect</h2>
-        <p>Select a row to inspect the signals behind its rank.</p>
+      <aside class="evidence-panel" *ngIf="activeEntry as entry; else emptyEvidence">
+        <p class="eyebrow">RANK {{ entry.rank | number:'2.0-0' }} / EXPLANATION</p>
+        <h2>{{ entry.name }}</h2>
+        <p class="player-meta">{{ entry.position }} · {{ entry.school }}</p>
+        <div class="score-hero"><span>{{ entry.score | number:'1.1-1' }}</span><small>UMM SCORE</small></div>
+        <div class="signal"><span>Team need</span><strong>{{ entry.need }}<i>%</i></strong><div class="meter"><b [style.width.%]="entry.need"></b></div></div>
+        <div class="signal"><span>Team fit</span><strong>{{ entry.fit }}<i>%</i></strong><div class="meter"><b [style.width.%]="entry.fit"></b></div></div>
+        <p class="source">Evidence: {{ entry.source }}</p>
       </aside>
-    </ng-template>
-  </section>
+
+      <ng-template #emptyEvidence>
+        <aside class="evidence-panel empty">
+          <span class="empty-icon">+</span>
+          <h2>Choose a prospect</h2>
+          <p>Select a row to inspect the signals behind its rank.</p>
+        </aside>
+      </ng-template>
+    </section>
+  </ng-container>
+
+  <ng-template #guestWorkspace>
+    <section class="guest-workspace" aria-label="UMockMe welcome">
+      <div class="guest-radar" aria-hidden="true"><span></span><span></span><span></span></div>
+      <p class="eyebrow">UMOCKME / DRAFT ROOM</p>
+      <h1>You control your own big board<br><em>with your team's draft tendencies.</em></h1>
+      <p class="guest-copy">A data driven NFL Draft workspace for better predictions, ultimate customization and AI Driven Picks.</p>
+      <p class="guest-claim">The most accurate prediction engine in the mock draft industry.</p>
+      <div class="guest-signals" aria-label="UMockMe features">
+        <span><b>32</b> teams</span>
+        <span><b>1</b> living board</span>
+        <span><b>∞</b> arguments</span>
+      </div>
+    </section>
+  </ng-template>
 </main>
