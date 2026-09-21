@@ -391,9 +391,12 @@ export class AppComponent implements OnInit {
     this.favoriteTeamMessage = null;
     this.favoriteTeamId = '';
     this.preferredTeamId = null;
-    this.selectedTeamId = '';
-    this.entries = [];
-    this.activeEntry = null;
+this.selectedTeamId = '';
+this.overallRandomness = 50;
+this.teamRandomnessOverrides = {};
+this.draftRunMessage = null;
+this.entries = [];
+this.activeEntry = null;
     this.boardId = null;
     this.boardVersion = null;
     this.authMessage = 'Signed out.';
