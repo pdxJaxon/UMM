@@ -21,16 +21,26 @@ class DraftRepository:
         """Create a repository bound to one request-scoped database session."""
         self.session = session
 
-    def create(self, user_id: str, controlled_team_id: str, draft_year: int, randomness_overrides: dict[str, float] | None = None) -> DraftRunRecord:
+    def create(
+        self,
+        user_id: str,
+        controlled_team_id: str,
+        draft_year: int,
+        randomness_overrides: dict[str, float] | None = None,
+        overall_randomness: float = 50,
+    ) -> DraftRunRecord:
         """Create a draft after validating its team and randomness overrides."""
         if self.session.get(TeamRecord, controlled_team_id) is None:
             raise ValueError("Controlled team does not exist")
         overrides = randomness_overrides or {}
+        if not 0 <= float(overall_randomness) <= 100:
+            raise ValueError("Overall randomness must be between 0 and 100")
         if any(not 0 <= float(value) <= 100 for value in overrides.values()):
             raise ValueError("Randomness overrides must be between 0 and 100")
         draft = DraftRunRecord(
             id=self._next_id("draft"), user_id=user_id, controlled_team_id=controlled_team_id,
-            draft_year=draft_year, status="drafting", randomness_overrides=overrides,
+            draft_year=draft_year, status="drafting", overall_randomness=overall_randomness,
+            randomness_overrides=overrides,
         )
         self.session.add(draft)
         self.session.flush()
@@ -80,7 +90,10 @@ class DraftRepository:
                 break
             team = self.session.get(TeamRecord, team_id)
             baseline = float(team.randomness_score or 0) if team else 50.0
-            randomness = draft.randomness_overrides.get(team_id, baseline)
+            randomness = draft.randomness_overrides.get(
+                team_id,
+                self._effective_randomness(draft.overall_randomness, baseline),
+            )
             player_id, applied_randomness = select_with_team_randomness(remaining, randomness, random.Random())
             self.add_pick(draft, team_id, player_id, "AUTO", applied_randomness)
             picks = self._ordered_picks(draft.id)
@@ -89,7 +102,15 @@ class DraftRepository:
         """Return API-ready state for a persisted draft."""
         picks = self._ordered_picks(draft.id)
         return {
-            "draft_run": {"id": draft.id, "user_id": draft.user_id, "controlled_team_id": draft.controlled_team_id, "season_year": draft.draft_year, "status": draft.status, "randomness_overrides": draft.randomness_overrides},
+            "draft_run": {
+                "id": draft.id,
+                "user_id": draft.user_id,
+                "controlled_team_id": draft.controlled_team_id,
+                "season_year": draft.draft_year,
+                "status": draft.status,
+                "overall_randomness": float(draft.overall_randomness),
+                "randomness_overrides": draft.randomness_overrides,
+            },
             "current_pick_number": len(picks) + 1,
             "current_team_id": self.current_team_id(len(picks)),
             "picks": [{"id": p.id, "draft_run_id": p.draft_run_id, "pick_number": p.pick_number, "round_number": p.round_number, "team_id": p.team_id, "player_id": p.player_id, "selection_source": p.selection_source, "randomness_factor": float(p.randomness_factor)} for p in picks],
@@ -137,3 +158,8 @@ class DraftRepository:
     def _next_id(self, prefix: str) -> str:
         """Generate a collision-resistant identifier within the current database."""
         return f"{prefix}-{self.session.query(DraftRunRecord).count() + 1}"
+
+    @staticmethod
+    def _effective_randomness(overall_randomness: float, team_randomness: float) -> float:
+        """Shift the team profile around the user's overall randomness baseline."""
+        return min(max(float(overall_randomness) + float(team_randomness) - 50.0, 0.0), 100.0)

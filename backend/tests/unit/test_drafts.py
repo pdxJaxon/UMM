@@ -90,6 +90,36 @@ def test_controlled_team_flow_auto_simulates_other_teams() -> None:
     assert response.json()["picks"][1]["selection_source"] == "USER"
 
 
+def test_draft_state_reports_overall_randomness_setting() -> None:
+    """A draft run should preserve the user's global randomness baseline."""
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {create_access_token('user-1')}"}
+
+    response = client.post(
+        "/api/drafts",
+        json={"controlled_team_id": "team-1", "draft_year": 2026, "overall_randomness": 25},
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    state = client.get(f"/api/drafts/{response.json()['draft_run_id']}", headers=headers)
+    assert state.json()["draft_run"]["overall_randomness"] == 25
+
+
+def test_draft_rejects_out_of_range_overall_randomness() -> None:
+    """Global randomness must remain within the documented 0-100 range."""
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {create_access_token('user-1')}"}
+
+    response = client.post(
+        "/api/drafts",
+        json={"controlled_team_id": "team-1", "draft_year": 2026, "overall_randomness": 101},
+        headers=headers,
+    )
+
+    assert response.status_code == 422
+
+
 def test_draft_access_is_limited_to_owner() -> None:
     """A different user must not read another user's draft."""
     client = TestClient(app)

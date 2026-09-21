@@ -19,6 +19,7 @@ class CreateDraftRequest(BaseModel):
 
     controlled_team_id: str
     draft_year: int = Field(ge=2020, le=2100)
+    overall_randomness: float = Field(default=50, ge=0, le=100)
     randomness_overrides: dict[str, float] = Field(default_factory=dict)
 
 
@@ -38,7 +39,13 @@ def start_draft(
     """Create a new draft run owned by the requesting user."""
     repository = DraftRepository(session)
     try:
-        draft = repository.create(current_user.id, payload.controlled_team_id, payload.draft_year, payload.randomness_overrides)
+        draft = repository.create(
+            current_user.id,
+            payload.controlled_team_id,
+            payload.draft_year,
+            payload.randomness_overrides,
+            payload.overall_randomness,
+        )
         session.commit()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

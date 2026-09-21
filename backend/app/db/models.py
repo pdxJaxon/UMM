@@ -311,6 +311,7 @@ class DraftRunRecord(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)
     completed_at = Column(DateTime, nullable=True)
+    overall_randomness = Column(Numeric(5, 2), nullable=False, default=50)
     randomness_overrides = Column(JSON, nullable=False, default=dict)
     user = relationship("UserRecord", back_populates="drafts")
     picks = relationship("DraftPickRecord", back_populates="draft_run", cascade="all, delete-orphan")
