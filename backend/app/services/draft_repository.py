@@ -8,9 +8,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import DraftPickRecord, DraftRunRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, TeamDraftingTendencyRecord, TeamNeedRecord
+from app.db.models import DraftPickRecord, DraftRunRecord, DraftTradeRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, TeamDraftingTendencyRecord, TeamNeedRecord
 from app.services.llm_prediction import OpenAICompatiblePredictionProvider, PredictionContext, PredictionProvider, predict_pick
 from app.services.ranking_service import select_with_team_randomness
+from app.services.trade_engine import evaluate_trade
 
 TEAM_ORDER = ("team-1", "team-2", "team-3")
 PLAYER_ORDER = ("player-1", "player-2", "player-3", "player-4", "player-5")
@@ -45,7 +46,7 @@ class DraftRepository:
         draft = DraftRunRecord(
             id=self._next_id("draft"), user_id=user_id, controlled_team_id=controlled_team_id,
             draft_year=draft_year, status="drafting", overall_randomness=overall_randomness,
-            randomness_overrides=overrides,
+            randomness_overrides=overrides, draft_order=list(TEAM_ORDER),
         )
         self.session.add(draft)
         self.session.flush()
@@ -75,7 +76,7 @@ class DraftRepository:
             raise ValueError("Player does not exist")
         if any(pick.player_id == player_id for pick in picks):
             raise ValueError("Player has already been selected")
-        if team_id != self.current_team_id(len(picks)):
+        if team_id != self.current_team_id(len(picks), self._draft_order(draft)):
             raise ValueError("That team is not currently on the clock")
         pick_number = len(picks) + 1
         pick = DraftPickRecord(
@@ -93,9 +94,13 @@ class DraftRepository:
     def auto_simulate(self, draft: DraftRunRecord) -> None:
         """Select available players until the controlled team is on the clock."""
         picks = self._ordered_picks(draft.id)
-        while draft.status != "completed" and self.current_team_id(len(picks)) != draft.controlled_team_id:
+        while draft.status != "completed" and self.current_team_id(len(picks), self._draft_order(draft)) != draft.controlled_team_id:
             selected = {pick.player_id for pick in picks}
-            team_id = self.current_team_id(len(picks))
+            pick_index = len(picks)
+            self._maybe_execute_trade(draft, pick_index)
+            team_id = self.current_team_id(pick_index, self._draft_order(draft))
+            if team_id == draft.controlled_team_id:
+                break
             remaining = self._available_board_candidates(draft, team_id, selected)
             if not remaining:
                 remaining = [candidate for candidate in PLAYER_ORDER if candidate not in selected]
@@ -154,16 +159,78 @@ randomness = self._effective_randomness(
                 "status": draft.status,
                 "overall_randomness": float(draft.overall_randomness),
                 "randomness_overrides": draft.randomness_overrides,
+                "draft_order": self._draft_order(draft),
             },
             "current_pick_number": len(picks) + 1,
-            "current_team_id": self.current_team_id(len(picks)),
+            "current_team_id": self.current_team_id(len(picks), self._draft_order(draft)),
             "picks": [{"id": p.id, "draft_run_id": p.draft_run_id, "pick_number": p.pick_number, "round_number": p.round_number, "team_id": p.team_id, "player_id": p.player_id, "selection_source": p.selection_source, "randomness_factor": float(p.randomness_factor), "prediction_metadata": p.prediction_metadata} for p in picks],
+            "trades": [
+                {
+                    "id": trade.id,
+                    "trade_number": trade.trade_number,
+                    "pick_number": trade.pick_number,
+                    "acquired_pick_number": trade.acquired_pick_number,
+                    "moving_up_team_id": trade.moving_up_team_id,
+                    "moving_down_team_id": trade.moving_down_team_id,
+                    "direction": trade.direction,
+                    "current_pick_value": float(trade.current_pick_value),
+                    "acquired_pick_value": float(trade.acquired_pick_value),
+                    "value_delta": float(trade.value_delta),
+                    "tendency_evidence": trade.tendency_evidence,
+                }
+                for trade in self._ordered_trades(draft.id)
+            ],
         }
 
     @staticmethod
-    def current_team_id(pick_count: int) -> str:
+    def current_team_id(pick_count: int, draft_order: list[str] | None = None) -> str:
         """Return the team assigned to the next pick."""
-        return "" if pick_count >= len(PLAYER_ORDER) else TEAM_ORDER[pick_count % len(TEAM_ORDER)]
+        order = draft_order or list(TEAM_ORDER)
+        return "" if pick_count >= len(PLAYER_ORDER) else order[pick_count % len(order)]
+
+    def _draft_order(self, draft: DraftRunRecord) -> list[str]:
+        """Return the persisted order, with compatibility for pre-trade runs."""
+        return list(draft.draft_order or TEAM_ORDER)
+
+    def _maybe_execute_trade(self, draft: DraftRunRecord, pick_index: int) -> DraftTradeRecord | None:
+        """Apply the strongest qualifying trade before the current pick."""
+        order = self._draft_order(draft)
+        tendencies = {
+            team_id: self._team_tendencies(team_id, draft.draft_year)
+            for team_id in set(order)
+        }
+        proposal = evaluate_trade(order, pick_index, tendencies)
+        if proposal is None:
+            return None
+        later_index = next(
+            index for index in range(pick_index + 1, len(order))
+            if order[index] == proposal.moving_up_team_id
+        )
+        order[pick_index], order[later_index] = order[later_index], order[pick_index]
+        draft.draft_order = order
+        trade_number = len(self._ordered_trades(draft.id)) + 1
+        trade = DraftTradeRecord(
+            id=f"{draft.id}-trade-{trade_number}",
+            draft_run_id=draft.id,
+            trade_number=trade_number,
+            pick_number=proposal.current_pick_number,
+            acquired_pick_number=proposal.acquired_pick_number,
+            moving_up_team_id=proposal.moving_up_team_id,
+            moving_down_team_id=proposal.moving_down_team_id,
+            direction="UP_DOWN",
+            current_pick_value=proposal.current_pick_value,
+            acquired_pick_value=proposal.acquired_pick_value,
+            value_delta=proposal.value_delta,
+            tendency_evidence=proposal.evidence,
+        )
+        self.session.add(trade)
+        self.session.flush()
+        return trade
+
+    def _ordered_trades(self, draft_id: str) -> list[DraftTradeRecord]:
+        """Load executed trades in their immutable event order."""
+        statement = select(DraftTradeRecord).where(DraftTradeRecord.draft_run_id == draft_id).order_by(DraftTradeRecord.trade_number)
+        return list(self.session.scalars(statement))
 
     def _ordered_picks(self, draft_id: str) -> list[DraftPickRecord]:
         """Load a draft's picks in immutable pick order."""
@@ -235,7 +302,19 @@ randomness = self._effective_randomness(
                 (TeamDraftingTendencyRecord.draft_year == draft_year) | (TeamDraftingTendencyRecord.draft_year.is_(None)),
             )
         ).all()
-        return [{"tendency_type": tendency.tendency_type, "position_code": tendency.position_code, "preference_score": float(tendency.preference_score), "confidence_score": float(tendency.confidence_score)} for tendency in tendencies]
+        return [
+            {
+                "tendency_type": tendency.tendency_type,
+                "position_code": tendency.position_code,
+                "preference_score": float(tendency.preference_score),
+                "confidence_score": float(tendency.confidence_score),
+                "sample_size": tendency.sample_size,
+                "source_name": tendency.source_name,
+                "rationale": tendency.rationale,
+                "is_active": tendency.is_active,
+            }
+            for tendency in tendencies
+        ]
 
     @staticmethod
     def _effective_randomness(overall_randomness: float, team_randomness: float) -> float:

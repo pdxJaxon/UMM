@@ -313,8 +313,10 @@ class DraftRunRecord(Base):
     completed_at = Column(DateTime, nullable=True)
     overall_randomness = Column(Numeric(5, 2), nullable=False, default=50)
     randomness_overrides = Column(JSON, nullable=False, default=dict)
+    draft_order = Column(JSON, nullable=False, default=list)
     user = relationship("UserRecord", back_populates="drafts")
     picks = relationship("DraftPickRecord", back_populates="draft_run", cascade="all, delete-orphan")
+    trades = relationship("DraftTradeRecord", back_populates="draft_run", cascade="all, delete-orphan")
 
 
 class DraftPickRecord(Base):
@@ -334,3 +336,24 @@ class DraftPickRecord(Base):
     prediction_metadata = Column(JSON, nullable=False, default=dict)
     selected_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     draft_run = relationship("DraftRunRecord", back_populates="picks")
+
+
+class DraftTradeRecord(Base):
+    """Auditable draft-order swap executed during a mock draft."""
+
+    __tablename__ = "draft_trades"
+
+    id = Column(String(64), primary_key=True)
+    draft_run_id = Column(String(64), ForeignKey("draft_runs.id"), index=True, nullable=False)
+    trade_number = Column(Integer, nullable=False)
+    pick_number = Column(Integer, nullable=False)
+    acquired_pick_number = Column(Integer, nullable=False)
+    moving_up_team_id = Column(String(64), ForeignKey("teams.id"), nullable=False)
+    moving_down_team_id = Column(String(64), ForeignKey("teams.id"), nullable=False)
+    direction = Column(String(20), nullable=False)
+    current_pick_value = Column(Numeric(8, 2), nullable=False)
+    acquired_pick_value = Column(Numeric(8, 2), nullable=False)
+    value_delta = Column(Numeric(8, 2), nullable=False)
+    tendency_evidence = Column(JSON, nullable=False, default=dict)
+    executed_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    draft_run = relationship("DraftRunRecord", back_populates="trades")

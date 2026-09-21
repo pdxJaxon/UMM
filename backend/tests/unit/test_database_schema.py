@@ -32,6 +32,7 @@ def test_database_schema_contains_core_tables() -> None:
         "player_derogatory_concerns",
         "draft_runs",
         "draft_picks",
+        "draft_trades",
     }
 
 

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
 from app.db.initialize import PLAYERS, TEAMS
-from app.db.models import DraftPickRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, UserRecord
+from app.db.models import DraftPickRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamDraftingTendencyRecord, TeamRecord, UserRecord
 from app.db.session import Base, get_db
 from app.main import app
 from app.services.draft_repository import DraftRepository
@@ -89,6 +89,39 @@ def test_controlled_team_flow_auto_simulates_other_teams() -> None:
     )
     assert response.status_code == 201
     assert response.json()["picks"][1]["selection_source"] == "USER"
+
+
+def test_auto_simulation_executes_historic_trade_and_stops_for_controlled_team(isolate_draft_store: Session) -> None:
+    """A strong trade-down and trade-up history should change the order before a pick."""
+    observed_at = datetime.now(UTC)
+    isolate_draft_store.add_all([
+        TeamDraftingTendencyRecord(
+            team_id="team-1", draft_year=None, tendency_type="trade_down",
+            preference_score=100, confidence_score=100, sample_size=5,
+            source_name="historical-drafts", rationale="Frequently accumulates extra picks",
+            observed_at=observed_at,
+        ),
+        TeamDraftingTendencyRecord(
+            team_id="team-2", draft_year=None, tendency_type="trade_up",
+            preference_score=100, confidence_score=100, sample_size=4,
+            source_name="historical-drafts", rationale="Frequently consolidates picks",
+            observed_at=observed_at,
+        ),
+    ])
+    isolate_draft_store.commit()
+
+    repository = DraftRepository(isolate_draft_store)
+    draft = repository.create("user-1", "team-2", 2026)
+    repository.auto_simulate(draft)
+
+    state = repository.state(draft)
+    assert state["current_team_id"] == "team-2"
+    assert state["picks"] == []
+    assert state["draft_run"]["draft_order"] == ["team-2", "team-1", "team-3"]
+    assert len(state["trades"]) == 1
+    assert state["trades"][0]["moving_up_team_id"] == "team-2"
+    assert state["trades"][0]["moving_down_team_id"] == "team-1"
+    assert state["trades"][0]["value_delta"] > 0
 
 
 def test_draft_state_reports_overall_randomness_setting() -> None:
