@@ -503,13 +503,16 @@ this.activeEntry = null;
   }
 
   private applyPreferredTeam(): void {
-    if (!this.preferredTeamId || !this.teams.some((team) => team.id === this.preferredTeamId)) {
+    const nextTeamId = this.preferredTeamId && this.teams.some((team) => team.id === this.preferredTeamId)
+      ? this.preferredTeamId
+      : this.selectedTeamId || this.teams[0]?.id;
+    if (!nextTeamId) {
       return;
     }
-    if (this.selectedTeamId === this.preferredTeamId && this.entries.length) {
+    if (this.selectedTeamId === nextTeamId && this.entries.length) {
       return;
     }
-    this.selectedTeamId = this.preferredTeamId;
+    this.selectedTeamId = nextTeamId;
     this.boardMode = 'default';
     this.loadBoard();
   }
