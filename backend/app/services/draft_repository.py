@@ -104,10 +104,10 @@ class DraftRepository:
                 break
             team = self.session.get(TeamRecord, team_id)
             baseline = float(team.randomness_score or 0) if team else 50.0
-            randomness = draft.randomness_overrides.get(
-                team_id,
-                self._effective_randomness(draft.overall_randomness, baseline),
-            )
+randomness = self._effective_randomness(
+    draft.overall_randomness,
+    draft.randomness_overrides.get(team_id, baseline),
+)
             source = "FALLBACK"
             metadata: dict[str, object] = {"mode": "deterministic-fallback"}
             if self.prediction_provider is not None:
