@@ -83,6 +83,30 @@
       <span class="status"><span class="status-dot"></span> {{ syncLabel }}</span>
     </section>
 
+    <section class="randomness-panel" aria-label="Mock draft randomness settings">
+      <div class="randomness-heading">
+        <p class="eyebrow">PREDICTION SETTINGS</p>
+        <h2>Let the model feel the room.</h2>
+        <p>Set the league-wide chaos level, then tune {{ selectedTeamName }} independently.</p>
+      </div>
+      <label class="range-control">
+        <span><b>Overall randomness</b><strong>{{ overallRandomness }}%</strong></span>
+        <input type="range" min="0" max="100" step="1" [(ngModel)]="overallRandomness">
+        <small>0 = chalk picks · 100 = wide-open outcomes</small>
+      </label>
+      <label class="range-control">
+        <span><b>{{ selectedTeamName }} tendency</b><strong>{{ selectedTeamRandomness }}%</strong></span>
+        <input type="range" min="0" max="100" step="1" [ngModel]="selectedTeamRandomness" (ngModelChange)="setSelectedTeamRandomness($event)">
+        <small>Team profile plus your override for this mock draft</small>
+      </label>
+      <div class="randomness-action">
+        <button class="action primary" (click)="startMockDraft()" [disabled]="startingDraft || !selectedTeamId">
+          {{ startingDraft ? 'Starting...' : 'Start mock draft' }}
+        </button>
+        <span *ngIf="draftRunMessage" class="preference-status">{{ draftRunMessage }}</span>
+      </div>
+    </section>
+
     <section class="board-layout">
       <div class="board-panel">
         <div class="panel-heading">

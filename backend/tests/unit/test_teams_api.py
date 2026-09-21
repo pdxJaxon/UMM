@@ -44,3 +44,5 @@ def test_list_teams_returns_all_nfl_teams_with_assets(teams_client) -> None:
     assert teams[-1]["abbreviation"] == "WSH"
     assert teams[0]["logo_url"].startswith("https://")
     assert teams[0]["official_url"].startswith("https://www.nfl.com/")
+    assert teams[7]["abbreviation"] == "CLE"
+    assert teams[7]["randomness_score"] == 85

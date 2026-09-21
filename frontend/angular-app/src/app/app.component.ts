@@ -8,6 +8,7 @@ interface TeamOption {
   name: string;
   abbreviation: string;
   logo_url: string;
+  randomness_score: number;
 }
 
 interface TeamColors {
@@ -109,6 +110,10 @@ export class AppComponent implements OnInit {
   protected favoriteTeamMessage: string | null = null;
   protected savingFavoriteTeam = false;
   protected boardVersion: number | null = null;
+  protected overallRandomness = 50;
+  protected teamRandomnessOverrides: Record<string, number> = {};
+  protected draftRunMessage: string | null = null;
+  protected startingDraft = false;
 
   private readonly apiBase = 'http://localhost:8000';
   private accessToken = '';
@@ -154,6 +159,16 @@ export class AppComponent implements OnInit {
       return { primary: '#e65734', secondary: '#1d2a2d' };
     }
     return TEAM_COLORS[this.selectedTeamAbbreviation] ?? { primary: '#e65734', secondary: '#1d2a2d' };
+  }
+
+  protected get selectedTeamRandomness(): number {
+    const override = this.teamRandomnessOverrides[this.selectedTeamId];
+    return override ?? this.teams.find((team) => team.id === this.selectedTeamId)?.randomness_score ?? 50;
+  }
+
+  protected setSelectedTeamRandomness(value: number): void {
+    if (!this.selectedTeamId) return;
+    this.teamRandomnessOverrides = { ...this.teamRandomnessOverrides, [this.selectedTeamId]: Number(value) };
   }
 
   protected get isAuthenticated(): boolean {
@@ -428,6 +443,34 @@ export class AppComponent implements OnInit {
       return;
     }
     this.generateBoard();
+  }
+
+  protected startMockDraft(): void {
+    if (!this.ensureAuthenticated('Sign in before starting a mock draft.')) return;
+    this.startingDraft = true;
+    this.draftRunMessage = null;
+    const overrides = this.teamRandomnessOverrides[this.selectedTeamId] === undefined
+      ? {}
+      : { [this.selectedTeamId]: this.teamRandomnessOverrides[this.selectedTeamId] };
+    this.http.post<{ draft_run_id: string }>(
+      `${this.apiBase}/api/drafts`,
+      {
+        controlled_team_id: this.selectedTeamId,
+        draft_year: this.draftYear,
+        overall_randomness: this.overallRandomness,
+        randomness_overrides: overrides
+      },
+      this.requestOptions(true)
+    ).subscribe({
+      next: (response) => {
+        this.startingDraft = false;
+        this.draftRunMessage = `Mock draft ${response.draft_run_id} is ready with your randomness settings.`;
+      },
+      error: (error: HttpErrorResponse) => {
+        this.startingDraft = false;
+        this.draftRunMessage = this.describeApiError(error, 'Unable to start the mock draft.');
+      }
+    });
   }
 
   protected moveEntry(index: number, direction: -1 | 1): void {

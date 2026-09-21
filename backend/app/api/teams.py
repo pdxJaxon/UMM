@@ -33,6 +33,7 @@ def list_teams(session: Session = Depends(get_db)) -> list[dict[str, object]]:
             "city": team.city,
             "abbreviation": team.abbreviation,
             "draft_order": team.draft_order,
+            "randomness_score": float(team.randomness_score),
             "logo_url": team.logo_url,
             "helmet_url": team.helmet_url,
             "official_url": team.official_url,
