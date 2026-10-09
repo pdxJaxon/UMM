@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import random
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -14,8 +14,7 @@ from app.services.leadership_tendencies import get_effective_tendencies
 from app.services.ranking_service import select_with_team_randomness
 from app.services.trade_engine import evaluate_trade
 
-TEAM_ORDER = ("team-1", "team-2", "team-3")
-PLAYER_ORDER = ("player-1", "player-2", "player-3", "player-4", "player-5")
+TEAM_ORDER = tuple(f"team-{number}" for number in range(1, 33))
 
 
 class DraftRepository:
@@ -44,10 +43,21 @@ class DraftRepository:
             raise ValueError("Overall randomness must be between 0 and 100")
         if any(not 0 <= float(value) <= 100 for value in overrides.values()):
             raise ValueError("Randomness overrides must be between 0 and 100")
+        team_order = [team.id for team in self.session.scalars(select(TeamRecord).order_by(TeamRecord.draft_order))]
+        if controlled_team_id not in team_order:
+            raise ValueError("Controlled team does not have a draft position")
+        eligible_prospects = self.session.scalar(
+            select(func.count()).select_from(PlayerRecord).where(
+                PlayerRecord.draft_year == draft_year,
+                PlayerRecord.eligibility_status == "eligible",
+            )
+        ) or 0
+        if eligible_prospects < len(team_order):
+            raise ValueError(f"At least {len(team_order)} eligible prospects are required for a first-round draft")
         draft = DraftRunRecord(
             id=self._next_id("draft"), user_id=user_id, controlled_team_id=controlled_team_id,
             draft_year=draft_year, status="drafting", overall_randomness=overall_randomness,
-            randomness_overrides=overrides, draft_order=list(TEAM_ORDER),
+            randomness_overrides=overrides, draft_order=team_order,
         )
         self.session.add(draft)
         self.session.flush()
@@ -73,7 +83,7 @@ class DraftRepository:
     ) -> DraftPickRecord:
         """Persist a unique pick and enforce the current draft order."""
         picks = self._ordered_picks(draft.id)
-        if player_id not in PLAYER_ORDER or self.session.get(PlayerRecord, player_id) is None:
+        if self.session.get(PlayerRecord, player_id) is None:
             raise ValueError("Player does not exist")
         if any(pick.player_id == player_id for pick in picks):
             raise ValueError("Player has already been selected")
@@ -87,7 +97,7 @@ class DraftRepository:
             prediction_metadata=prediction_metadata or {},
         )
         self.session.add(pick)
-        if pick_number >= len(PLAYER_ORDER):
+        if pick_number >= len(self._draft_order(draft)):
             draft.status = "completed"
         self.session.flush()
         return pick
@@ -104,7 +114,15 @@ class DraftRepository:
                 break
             remaining = self._available_board_candidates(draft, team_id, selected)
             if not remaining:
-                remaining = [candidate for candidate in PLAYER_ORDER if candidate not in selected]
+                remaining = list(self.session.scalars(
+                    select(PlayerRecord.id)
+                    .where(
+                        PlayerRecord.draft_year == draft.draft_year,
+                        PlayerRecord.eligibility_status == "eligible",
+                        PlayerRecord.id.not_in(selected),
+                    )
+                    .order_by(PlayerRecord.id)
+                ))
             if not remaining:
                 draft.status = "completed"
                 break
@@ -187,7 +205,7 @@ class DraftRepository:
     def current_team_id(pick_count: int, draft_order: list[str] | None = None) -> str:
         """Return the team assigned to the next pick."""
         order = draft_order or list(TEAM_ORDER)
-        return "" if pick_count >= len(PLAYER_ORDER) else order[pick_count % len(order)]
+        return "" if pick_count >= len(order) else order[pick_count % len(order)]
 
     def _draft_order(self, draft: DraftRunRecord) -> list[str]:
         """Return the persisted order, with compatibility for pre-trade runs."""

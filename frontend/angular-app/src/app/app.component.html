@@ -66,19 +66,19 @@
       </div>
       <div class="board-action">
         <span>{{ boardMode === 'personal' ? 'Reorder with the arrows, then save.' : 'Start with the team model, then make it yours.' }}</span>
-        <button class="action primary" (click)="completeBoardAction()" [disabled]="!boardActionEnabled">{{ boardActionLabel }}</button>
+        <button class="action primary" (click)="completeBoardAction()" [disabled]="!boardActionEnabled || !!draftId">{{ boardActionLabel }}</button>
       </div>
     </section>
 
     <section class="control-strip" aria-label="Board controls">
       <label>TEAM
-        <select [(ngModel)]="selectedTeamId" (ngModelChange)="onTeamChange()">
+        <select [(ngModel)]="selectedTeamId" (ngModelChange)="onTeamChange()" [disabled]="!!draftId">
           <option *ngFor="let team of teams" [value]="team.id">{{ team.name }}</option>
         </select>
       </label>
       <div class="segmented">
-        <button [class.active]="boardMode === 'default'" (click)="setBoardMode('default')">Default board</button>
-        <button [class.active]="boardMode === 'personal'" (click)="setBoardMode('personal')">My board</button>
+        <button [class.active]="boardMode === 'default'" (click)="setBoardMode('default')" [disabled]="!!draftId">Default board</button>
+        <button [class.active]="boardMode === 'personal'" (click)="setBoardMode('personal')" [disabled]="!!draftId">My board</button>
       </div>
       <span class="status"><span class="status-dot"></span> {{ syncLabel }}</span>
     </section>
@@ -91,21 +91,83 @@
       </div>
       <label class="range-control">
         <span><b>Overall randomness</b><strong>{{ overallRandomness }}%</strong></span>
-        <input type="range" min="0" max="100" step="1" [(ngModel)]="overallRandomness">
+        <input type="range" min="0" max="100" step="1" [(ngModel)]="overallRandomness" [disabled]="!!draftId">
         <small>0 = chalk picks · 100 = wide-open outcomes</small>
       </label>
       <label class="range-control">
         <span><b>{{ selectedTeamName }} tendency</b><strong>{{ selectedTeamRandomness }}%</strong></span>
-        <input type="range" min="0" max="100" step="1" [ngModel]="selectedTeamRandomness" (ngModelChange)="setSelectedTeamRandomness($event)">
+        <input type="range" min="0" max="100" step="1" [ngModel]="selectedTeamRandomness" (ngModelChange)="setSelectedTeamRandomness($event)" [disabled]="!!draftId">
         <small>Team profile plus your override for this mock draft</small>
       </label>
       <div class="randomness-action">
-        <button class="action primary" (click)="startMockDraft()" [disabled]="startingDraft || !selectedTeamId">
-          {{ startingDraft ? 'Starting...' : 'Start mock draft' }}
+        <button class="action primary" (click)="startMockDraft()" [disabled]="startingDraft || !!draftId || !selectedTeamId">
+          {{ startingDraft ? 'Starting...' : draftId ? 'Draft in progress' : 'Start mock draft' }}
         </button>
         <span *ngIf="draftRunMessage" class="preference-status">{{ draftRunMessage }}</span>
       </div>
     </section>
+
+    <section *ngIf="draftState as draft" class="draft-room" aria-label="Mock draft room">
+      <header class="draft-room-header">
+        <div>
+          <p class="eyebrow">{{ draft.draft_run.season_year }} MOCK DRAFT / ROUND 1</p>
+          <h2>{{ draft.draft_run.status === 'completed' ? 'Round complete' : currentDraftTeamName + ' on the clock' }}</h2>
+          <p>Pick {{ draft.current_pick_number }} of {{ draft.draft_run.draft_order.length }} · You control {{ teamName(draft.draft_run.controlled_team_id) }}</p>
+        </div>
+        <div class="draft-progress" aria-label="Draft progress">
+          <strong>{{ draft.picks.length }}<small> / {{ draft.draft_run.draft_order.length }}</small></strong>
+          <span>selections made</span>
+        </div>
+      </header>
+
+      <p *ngIf="draftError" class="draft-error" role="alert">
+        {{ draftError }}
+        <button *ngIf="draft.draft_run.status === 'drafting'" class="text-button" (click)="simulateToUserPick()" [disabled]="draftBusy">Retry advance</button>
+      </p>
+
+      <div *ngIf="draftBusy" class="draft-status" role="status" aria-live="polite">Updating the draft board…</div>
+
+      <div *ngIf="draft.draft_run.status === 'drafting' && draftOnControlledTeam" class="draft-on-clock">
+        <div>
+          <p class="eyebrow">YOUR PICK / {{ draft.current_pick_number | number:'2.0-0' }}</p>
+          <label for="draft-player">Select a prospect from {{ teamName(draft.draft_run.controlled_team_id) }}'s board</label>
+        </div>
+        <select id="draft-player" [(ngModel)]="draftSelectedPlayerId" [disabled]="draftBusy || draftCandidates.length === 0">
+          <option *ngFor="let candidate of draftCandidates" [value]="candidate.player_id">
+            {{ candidate.rank | number:'2.0-0' }} · {{ candidate.name }} · {{ candidate.position }} · {{ candidate.school }}
+          </option>
+        </select>
+        <button class="action primary" (click)="submitDraftPick()" [disabled]="draftBusy || !draftSelectedPlayerId">Make pick</button>
+        <p *ngIf="draftCandidates.length === 0" class="draft-empty">No available players remain on this board.</p>
+      </div>
+
+      <div *ngIf="draft.draft_run.status === 'drafting' && !draftOnControlledTeam && !draftBusy && !draftError" class="draft-status" role="status">
+        Simulating picks until your team is on the clock.
+      </div>
+
+      <div class="draft-history-heading">
+        <h3>Pick log</h3>
+        <span>{{ draft.picks.length }} picks</span>
+      </div>
+      <ol class="draft-pick-list">
+        <li *ngFor="let pick of draft.picks">
+          <span class="draft-pick-number">{{ pick.pick_number | number:'2.0-0' }}</span>
+          <strong>{{ teamName(pick.team_id) }}</strong>
+          <span class="draft-player">{{ draftPlayerName(pick.player_id) }}</span>
+          <span class="draft-pick-source">{{ pick.selection_source }}</span>
+        </li>
+      </ol>
+
+      <div *ngIf="draft.trades.length" class="draft-trade-note">
+        {{ draft.trades.length }} trade{{ draft.trades.length === 1 ? '' : 's' }} executed during this round.
+      </div>
+      <button *ngIf="draft.draft_run.status === 'completed'" class="action" (click)="closeDraft()">Close draft</button>
+    </section>
+
+    <p *ngIf="draftError && !draftState" class="draft-error" role="alert">
+      {{ draftError }}
+      <button *ngIf="draftId" class="text-button" (click)="simulateToUserPick()" [disabled]="draftBusy">Retry advance</button>
+    </p>
 
     <section class="board-layout">
       <div class="board-panel">
@@ -139,8 +201,8 @@
               <span>Fit <b>{{ entry.fit | number:'1.0-0' }}</b></span>
             </div>
             <span class="score">{{ entry.score | number:'1.1-1' }}<small>UMM</small></span>
-            <button class="move" title="Move prospect up" aria-label="Move prospect up" (click)="$event.stopPropagation(); moveEntry(i, -1)" [disabled]="boardMode !== 'personal' || i === 0">↑</button>
-            <button class="move" title="Move prospect down" aria-label="Move prospect down" (click)="$event.stopPropagation(); moveEntry(i, 1)" [disabled]="boardMode !== 'personal' || i === entries.length - 1">↓</button>
+            <button class="move" title="Move prospect up" aria-label="Move prospect up" (click)="$event.stopPropagation(); moveEntry(i, -1)" [disabled]="!!draftId || boardMode !== 'personal' || i === 0">↑</button>
+            <button class="move" title="Move prospect down" aria-label="Move prospect down" (click)="$event.stopPropagation(); moveEntry(i, 1)" [disabled]="!!draftId || boardMode !== 'personal' || i === entries.length - 1">↓</button>
           </article>
         </div>
       </div>
