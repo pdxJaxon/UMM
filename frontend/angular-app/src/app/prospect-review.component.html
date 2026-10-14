@@ -1,0 +1,41 @@
+<section class="review" aria-labelledby="prospect-review-title" [attr.aria-busy]="loading">
+  <header>
+    <div>
+      <p class="eyebrow">SOURCE DATA / READ ONLY</p>
+      <h2 id="prospect-review-title">{{ draftYear }} prospect review</h2>
+      <p>PFF editorial rankings and displayed grades, not UMM scores. Snapshot inclusion does not confirm draft eligibility.</p>
+    </div>
+    <button type="button" (click)="load()" [disabled]="loading">{{ loading ? 'Loading...' : 'Refresh review' }}</button>
+  </header>
+  <p *ngIf="loading" role="status">Loading imported prospect snapshots...</p>
+  <p *ngIf="error" role="alert" class="error">{{ error }}</p>
+  <ng-container *ngIf="review as data">
+    <p *ngIf="!data.snapshot" role="status">No PFF snapshot has been imported for {{ draftYear }}. Collection and import are separate, explicit operations.</p>
+    <ng-container *ngIf="data.snapshot as snapshot">
+      <dl>
+        <div><dt>Latest collection</dt><dd>{{ snapshot.collected_at | date:'medium':'UTC' }} UTC</dd></div>
+        <div><dt>Source update</dt><dd>{{ snapshot.source_updated_at_display ?? 'Not provided' }}</dd></div>
+        <div><dt>Prospects</dt><dd>{{ snapshot.prospect_count }}</dd></div>
+        <div><dt>Compared with</dt><dd>{{ data.previous_snapshot ? (data.previous_snapshot.collected_at | date:'medium':'UTC') + ' UTC' : 'No earlier snapshot' }}</dd></div>
+      </dl>
+      <p><a [href]="snapshot.source_url" target="_blank" rel="noopener noreferrer">View PFF source board</a></p>
+      <p class="scope">{{ snapshot.scope }}</p>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Prospect rankings, scroll horizontally on small screens">
+        <table>
+          <caption>Latest imported PFF board. Movement compares ranks with the previous collected snapshot, not eligibility or talent changes.</caption>
+          <thead><tr><th scope="col">PFF rank</th><th scope="col">Prospect</th><th scope="col">School</th><th scope="col">Position</th><th scope="col">Prior rank</th><th scope="col">Movement</th><th scope="col">PFF grade</th><th scope="col">Eligibility</th></tr></thead>
+          <tbody>
+            <tr *ngFor="let row of data.entries">
+              <td>{{ row.overall_rank }}</td><th scope="row">{{ row.name }}</th><td>{{ row.school }}</td>
+              <td>{{ row.source_position }}<small *ngIf="row.source_position !== row.canonical_position">UMM: {{ row.canonical_position }}</small></td>
+              <td>{{ row.previous_rank ?? 'Not available' }}</td>
+              <td [class.up]="row.rank_change !== null && row.rank_change > 0" [class.down]="row.rank_change !== null && row.rank_change < 0">{{ movement(row) }}</td>
+              <td>{{ row.pff_grade === null ? 'Not provided' : (row.pff_grade | number:'1.1-2') }}</td>
+              <td><span class="eligibility" [class.unconfirmed]="row.eligibility_status === 'unconfirmed'">{{ row.eligibility_status }}</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </ng-container>
+  </ng-container>
+</section>

@@ -169,3 +169,20 @@ Deployment gates: verify live fresh/reloaded collection, run a read-only preview
 against the intended database, apply/verify migrations, run one supervised batch,
 then install the chosen scheduler and failure/staleness alerts. These steps are
 not satisfied by offline DOM or isolated-database tests.
+
+### Read-only prospect review
+
+Signed-in users can select **Prospect data** in the Angular workspace to review
+the latest imported PFF snapshot for the configured draft season. The view shows
+collection time in UTC, the source's update label and URL, scope, source school
+and position, canonical position, PFF rank/grade, and current UMM eligibility.
+Missing grades are explicitly labeled, not converted to zero.
+
+The authenticated `GET /api/prospect-boards/pff/latest?draft_year=2027` endpoint
+compares the latest two snapshots by collection timestamp (ID breaks ties), not
+import order. Positive rank changes mean a move up the board; negative changes
+mean a move down. Players absent from the previous snapshot are labeled new,
+and a first snapshot has no comparison. Rows absent from the latest snapshot
+are not displayed or deleted. Comparison is always within the same source and
+draft year. This view does not fetch PFF, import data, change eligibility, or
+regenerate UMM boards. No imported snapshot produces an explicit empty state.

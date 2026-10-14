@@ -49,6 +49,14 @@
   </section>
 
   <ng-container *ngIf="isAuthenticated; else guestWorkspace">
+    <nav class="control-strip" aria-label="Workspace views">
+      <div class="segmented">
+        <button type="button" [class.active]="workspaceView === 'board'" [attr.aria-pressed]="workspaceView === 'board'" (click)="workspaceView = 'board'">Draft board</button>
+        <button type="button" [class.active]="workspaceView === 'prospects'" [attr.aria-pressed]="workspaceView === 'prospects'" (click)="workspaceView = 'prospects'">Prospect data</button>
+      </div>
+    </nav>
+    <umm-prospect-review *ngIf="workspaceView === 'prospects'" [apiBase]="apiBase" [draftYear]="draftYear" [headers]="requestOptions(true).headers ?? {}"></umm-prospect-review>
+    <ng-container *ngIf="workspaceView === 'board'">
     <section class="workspace-header">
       <div class="team-identity" aria-label="Selected team">
         <div class="team-logo-wrap">
@@ -225,6 +233,8 @@
         </aside>
       </ng-template>
     </section>
+  </ng-container>
+
   </ng-container>
 
   <ng-template #guestWorkspace>

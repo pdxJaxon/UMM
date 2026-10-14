@@ -2,6 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpClientModule, HttpErrorResponse } from '@angular/common/http';
+import { ProspectReviewComponent } from './prospect-review.component';
 
 interface TeamOption {
   id: string;
@@ -112,7 +113,7 @@ interface AuthResponse {
 @Component({
   selector: 'umm-root',
   standalone: true,
-  imports: [CommonModule, FormsModule, HttpClientModule],
+  imports: [CommonModule, FormsModule, HttpClientModule, ProspectReviewComponent],
   templateUrl: './app.component.html',
   styleUrl: './app.component.css'
 })
@@ -145,11 +146,12 @@ export class AppComponent implements OnInit {
   protected draftError: string | null = null;
   protected draftBusy = false;
   protected draftSelectedPlayerId = '';
+  protected workspaceView: 'board' | 'prospects' = 'board';
 
-  private readonly apiBase = 'http://localhost:8000';
+  protected readonly apiBase = 'http://localhost:8000';
   private accessToken = '';
   private boardId: number | null = null;
-  private readonly draftYear = 2027;
+  protected readonly draftYear = 2027;
 
   constructor(private readonly http: HttpClient) {}
 
@@ -658,7 +660,7 @@ this.activeEntry = null;
     return false;
   }
 
-  private requestOptions(includeAuth: boolean): { headers?: Record<string, string> } {
+  protected requestOptions(includeAuth: boolean): { headers?: Record<string, string> } {
     if (!includeAuth || !this.accessToken) {
       return {};
     }
