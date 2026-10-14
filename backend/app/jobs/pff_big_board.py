@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from app.services.pff_browser_collector import collect_board
-from app.services.pff_snapshot import PFFBoardSnapshot
+from app.services.pff_snapshot import PFFBoardSnapshot, load_identity_overrides
 
 
 def main() -> int:
@@ -47,11 +47,10 @@ def main() -> int:
     snapshot = PFFBoardSnapshot.model_validate_json(args.snapshot.read_text(encoding="utf-8-sig"))
     overrides = None
     if args.identity_map:
-        overrides = json.loads(args.identity_map.read_text(encoding="utf-8-sig"))
-        if not isinstance(overrides, dict) or not all(
-            isinstance(key, str) and isinstance(value, str) and value for key, value in overrides.items()
-        ):
-            parser.error("Identity map must be a JSON object mapping source keys to existing player IDs")
+        try:
+            overrides = load_identity_overrides(args.identity_map)
+        except ValueError as exc:
+            parser.error(str(exc))
     with SessionLocal() as session:
         report = import_board_snapshot(session, snapshot, overrides, commit=args.commit)
     print(json.dumps(report, indent=2))

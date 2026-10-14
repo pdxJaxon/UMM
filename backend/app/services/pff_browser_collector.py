@@ -57,6 +57,8 @@ def collect_board(
     storage_state: Path | None = None,
     headed: bool = False,
     cdp_url: str | None = None,
+    *,
+    refresh_existing: bool = False,
 ) -> PFFBoardSnapshot:
     """Read ordinary page content; never log in, bypass controls, or use an API key."""
     from playwright.sync_api import sync_playwright
@@ -65,6 +67,8 @@ def collect_board(
         raise ValueError("Invalid draft year or minimum prospect count")
     if cdp_url and (storage_state is not None or headed):
         raise ValueError("Existing-browser collection cannot also use --storage-state or --headed")
+    if refresh_existing and not cdp_url:
+        raise ValueError("Refreshing an existing tab requires a CDP connection")
     if cdp_url:
         connection_url = urlparse(cdp_url)
         if connection_url.scheme != "http" or connection_url.hostname not in {"localhost", "127.0.0.1", "::1"}:
@@ -85,6 +89,12 @@ def collect_board(
                 if len(pages) != 1:
                     raise ValueError("Open exactly one matching PFF season tab in the authorized browser")
                 page = pages[0]
+                if refresh_existing:
+                    response = page.reload(wait_until="domcontentloaded", timeout=60_000)
+                    if response is None or not response.ok:
+                        raise RuntimeError(
+                            f"PFF page reload failed: {response.status if response else 'no response'}"
+                        )
             else:
                 options: dict[str, Any] = {}
                 if storage_state is not None:

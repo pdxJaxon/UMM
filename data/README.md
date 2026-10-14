@@ -106,3 +106,66 @@ your normal migration process):
 
 Licensed snapshots and browser authentication files should not be committed.
 `data/prospects/` and `playwright/.auth/` are ignored for this purpose.
+
+### Nightly automatic refresh (scheduler installation deferred)
+
+The host-neutral batch command collects a fresh board, archives the validated
+snapshot, and automatically imports it in one database transaction. Unlike the
+manual `import` command, this explicitly named refresh command writes by default:
+
+```powershell
+# Run from backend, with DATABASE_URL pointing to the intended initialized DB.
+# Requires live authorized collection to be verified before production use.
+..\.venv\Scripts\python.exe -m app.jobs.refresh_pff_board --draft-year 2027 --min-prospects 150 --output-dir ..\data\prospects
+
+# Alternative: a dedicated authorized local browser with exactly one season tab.
+# This batch RELOADS that tab before extraction; the manual collector does not.
+..\.venv\Scripts\python.exe -m app.jobs.refresh_pff_board --draft-year 2027 --min-prospects 150 --output-dir ..\data\prospects --cdp-url http://127.0.0.1:9222
+```
+
+`--storage-state` is another option, mutually exclusive with `--cdp-url`.
+There is no automated login or access-control bypass. The October 14 validation
+found fresh headed/headless sessions did not render rows; live CDP refresh still
+needs verification. A pre-existing browser tab is not evidence that unattended
+reloads will work. Browser/session expiry must cause failure, not stale success.
+
+Operational contract:
+
+- Schedule exactly one invocation nightly on the eventual always-on host. The
+  OS, nightly time/timezone, scheduler, and alert destination are not yet chosen;
+  no schedule has been installed or enabled. Do not run a timer in every API
+  worker. Keep an explicit draft year; review the season rollover each year.
+- All scheduled invocations targeting the same database must use the **same
+  absolute output directory on one host's local filesystem**. A nonblocking OS
+  file lock prevents overlap and is released on process exit/crash; leave the
+  lock file in place. Multiple hosts, network filesystems, and manual imports
+  concurrent with the batch are not supported by this host-local guard.
+- Each invocation writes a unique UTC-dated `*.run.json` report. Once validated,
+  collection is atomically archived as `*.snapshot.json` **before** importing.
+  Final reports include timestamps, stage, import counts, and snapshot ID.
+  New dates preserve history even when rankings are unchanged.
+- Unknown mappings, identity conflicts, undersized boards, and any reduction
+  from the latest imported season's row count block the entire import. Nothing
+  is deleted when a prospect drops off a board. A legitimate count reduction
+  requires review and the manual snapshot import command above.
+- Failures exit nonzero and log the exception/run ID/stage to stderr; the run
+  report records `failed` and the exception type. Wire the host scheduler to
+  alert on nonzero exits **and missing nightly success**, not merely file
+  creation. Setup errors can occur before a report exists; a killed process can
+  leave a `running` report. Do not treat either as success.
+- No internal retries hide review failures. Resolve the cause, then retry a new
+  collection or manually import the archived snapshot. `--identity-map` accepts
+  reviewed overrides using the same rules as manual import. An exact snapshot
+  retry is idempotent. If the DB committed but final report writing failed,
+  check/reimport that archived snapshot rather than assuming it rolled back.
+- The job does not initialize/migrate the database, seed reference data, change
+  eligibility or UMM scores, or regenerate team boards. Apply migrations and
+  verify reference data once through the normal deployment process.
+- Restrict filesystem access to snapshots/reports (which include prospect
+  identities), browser state, and database credentials. Keep them outside git,
+  back up dated history, and set retention/monitoring before enabling production.
+
+Deployment gates: verify live fresh/reloaded collection, run a read-only preview
+against the intended database, apply/verify migrations, run one supervised batch,
+then install the chosen scheduler and failure/staleness alerts. These steps are
+not satisfied by offline DOM or isolated-database tests.

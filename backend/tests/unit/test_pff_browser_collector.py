@@ -27,6 +27,7 @@ def browser_setup():
         page = context.new_page.return_value
         page.url = "https://www.pff.com/draft/big-board?season=2027"
         page.goto.return_value.ok = True
+        page.reload.return_value.ok = True
         page.locator.return_value.evaluate.return_value = _rendered()
         page.get_by_role.return_value.count.return_value = 0
         browser.contexts = [context]
@@ -58,6 +59,7 @@ def test_existing_browser_requires_exact_season_tab_and_is_left_open(browser_set
     playwright.chromium.connect_over_cdp.assert_called_once_with("http://127.0.0.1:9222")
     playwright.chromium.launch.assert_not_called()
     page.goto.assert_not_called()
+    page.reload.assert_not_called()
     browser.new_context.assert_not_called()
     browser.close.assert_not_called()
     page.url = "https://www.pff.com/draft/big-board?season=2026"
@@ -65,10 +67,32 @@ def test_existing_browser_requires_exact_season_tab_and_is_left_open(browser_set
         collect_board(2027, 1, cdp_url="http://127.0.0.1:9222")
 
 
+def test_nightly_existing_browser_reloads_before_reading(browser_setup):
+    _, browser, page = browser_setup
+    collect_board(2027, 1, cdp_url="http://127.0.0.1:9222", refresh_existing=True)
+    page.reload.assert_called_once_with(wait_until="domcontentloaded", timeout=60_000)
+    browser.close.assert_not_called()
+
+
+@pytest.mark.parametrize("status", [None, 403])
+def test_existing_browser_reload_failure_never_reads_old_rows(browser_setup, status):
+    _, browser, page = browser_setup
+    if status is None:
+        page.reload.return_value = None
+    else:
+        page.reload.return_value.ok = False
+        page.reload.return_value.status = status
+    with pytest.raises(RuntimeError, match="reload failed"):
+        collect_board(2027, 1, cdp_url="http://127.0.0.1:9222", refresh_existing=True)
+    page.locator.assert_not_called()
+    browser.close.assert_not_called()
+
+
 @pytest.mark.parametrize("kwargs", [
     {"draft_year": 2019}, {"draft_year": 2027, "min_prospects": 0},
     {"draft_year": 2027, "cdp_url": "https://remote.example"},
     {"draft_year": 2027, "cdp_url": "http://127.0.0.1:9222", "headed": True},
+    {"draft_year": 2027, "refresh_existing": True},
 ])
 def test_invalid_browser_configuration_fails_before_launch(kwargs):
     with pytest.raises(ValueError):

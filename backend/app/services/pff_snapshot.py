@@ -6,6 +6,7 @@ import hashlib
 import json
 import unicodedata
 from datetime import UTC, datetime
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -26,6 +27,16 @@ SCHOOL_ALIASES = {
     "southern methodist": "smu", "pitt": "pittsburgh",
     "uconn": "connecticut", "massachusetts": "umass",
 }
+
+
+def load_identity_overrides(path: Path) -> dict[str, str]:
+    """Load only explicit source-key to existing-player decisions."""
+    overrides = json.loads(path.read_text(encoding="utf-8-sig"))
+    if not isinstance(overrides, dict) or not all(
+        isinstance(key, str) and isinstance(value, str) and value for key, value in overrides.items()
+    ):
+        raise ValueError("Identity map must be a JSON object mapping source keys to existing player IDs")
+    return overrides
 
 
 def normalized_name(value: str) -> str:
