@@ -1,4 +1,4 @@
-"""Tests for the FBS college reference-data endpoint."""
+"""Tests for the college reference-data endpoint."""
 
 import pytest
 from fastapi.testclient import TestClient
@@ -29,13 +29,16 @@ def colleges_client():
     session.close()
 
 
-def test_list_colleges_returns_fbs_conference_metadata(colleges_client) -> None:
-    """The endpoint should expose all seeded FBS programs and classifications."""
+def test_list_colleges_returns_conference_and_division_metadata(colleges_client) -> None:
+    """The endpoint should expose existing FBS programs plus the reviewed FCS school."""
     response = colleges_client.get("/api/colleges")
 
     assert response.status_code == 200
     colleges = response.json()
-    assert len(colleges) == 136
-    assert {college["division"] for college in colleges} == {"FBS"}
+    assert len(colleges) == 137
+    assert {college["division"] for college in colleges} == {"FBS", "FCS"}
     assert {college["conference"] for college in colleges} >= {"ACC", "Big Ten", "SEC"}
-    assert all(college["logo_url"].startswith("https://") for college in colleges)
+    assert all(college["logo_url"].startswith("https://") for college in colleges if college["division"] == "FBS")
+    youngstown = next(college for college in colleges if college["id"] == "youngstown-state")
+    assert youngstown["division"] == "FCS"
+    assert youngstown["official_url"] == "https://ysusports.com/sports/football"

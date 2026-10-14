@@ -1,4 +1,4 @@
-"""Public reference-data endpoints for FBS college football programs."""
+"""Public reference-data endpoints for referenced college football programs."""
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/colleges", tags=["colleges"])
 
 @router.get("")
 def list_colleges(session: Session = Depends(get_db)) -> list[dict[str, object]]:
-    """Return FBS programs ordered by conference and school name."""
+    """Return referenced programs and their divisions, ordered by conference and name."""
     colleges = session.scalars(
         select(CollegeRecord).order_by(CollegeRecord.conference, CollegeRecord.name)
     ).all()

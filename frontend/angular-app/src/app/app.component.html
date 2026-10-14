@@ -112,7 +112,7 @@
         <div>
           <p class="eyebrow">{{ draft.draft_run.season_year }} MOCK DRAFT / ROUND 1</p>
           <h2>{{ draft.draft_run.status === 'completed' ? 'Round complete' : currentDraftTeamName + ' on the clock' }}</h2>
-          <p>Pick {{ draft.current_pick_number }} of {{ draft.draft_run.draft_order.length }} · You control {{ teamName(draft.draft_run.controlled_team_id) }}</p>
+          <p>{{ draft.draft_run.status === 'completed' ? draft.picks.length + ' picks completed' : 'Pick ' + draft.current_pick_number + ' of ' + draft.draft_run.draft_order.length }} · You control {{ teamName(draft.draft_run.controlled_team_id) }}</p>
         </div>
         <div class="draft-progress" aria-label="Draft progress">
           <strong>{{ draft.picks.length }}<small> / {{ draft.draft_run.draft_order.length }}</small></strong>

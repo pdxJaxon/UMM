@@ -35,6 +35,9 @@ def test_database_schema_contains_core_tables() -> None:
         "draft_trades",
         "historical_draft_trades",
         "team_leadership",
+        "prospect_source_identities",
+        "prospect_board_snapshots",
+        "prospect_board_rankings",
     }
 
 
@@ -47,7 +50,7 @@ def test_reference_seed_is_idempotent() -> None:
         seed_reference_data(session)
         seed_reference_data(session)
         assert session.query(TeamRecord).count() == 32
-        assert session.query(CollegeRecord).count() == 136
+        assert session.query(CollegeRecord).count() == 137
         assert session.query(PositionImportanceRecord).count() == 15
         assert session.query(PlayerRecord).count() == 0
 
