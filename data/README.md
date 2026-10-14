@@ -186,3 +186,71 @@ and a first snapshot has no comparison. Rows absent from the latest snapshot
 are not displayed or deleted. Comparison is always within the same source and
 draft year. This view does not fetch PFF, import data, change eligibility, or
 regenerate UMM boards. No imported snapshot produces an explicit empty state.
+
+## Versioned draft-order snapshots
+
+Draft orders are imported from a reviewed JSON file, not scraped. No live
+provider data is bundled. Confirm source permission before importing real data.
+Apply `backend/app/db/migrations/021_add_draft_order_snapshots.sql` for PostgreSQL
+through the normal deployment process. SQLite's explicit schema initializer
+adds the provenance column for existing databases; it also seeds references,
+so review the configured database before running it. Neither job below migrates
+or seeds the database.
+
+Snapshot shape (synthetic abbreviated example, not a real NFL order):
+
+```json
+{
+  "draft_year": 2027,
+  "collected_at": "2026-10-14T21:00:00Z",
+  "source_name": "reviewed-source",
+  "source_url": "https://example.com/order",
+  "order_status": "projected",
+  "scope": "first_round",
+  "expected_round_counts": [2],
+  "picks": [
+    {"overall_pick": 1, "round_number": 1, "owner_team_id": "team-2"},
+    {"overall_pick": 2, "round_number": 1, "owner_team_id": "team-2",
+     "original_team_id": "team-1", "details": "Only include explicitly sourced trade facts"}
+  ]
+}
+```
+
+Use canonical UMM team IDs, not provider abbreviations. Original ownership and
+trade/conditional details are optional; unknown does not mean untraded.
+`order_status` must be `projected` or `final`; final is an operator assertion
+requiring supporting evidence, not something inferred from a URL. Scope is
+`first_round` or `full_draft` (all seven rounds). `expected_round_counts` lists
+the independently reviewed count for each included round. This prevents a
+truncated file passing solely because its pick numbers happen to be consecutive;
+the reviewer must establish those counts from the source. Rounds 1 and 2 cannot
+exceed 32 picks, but fewer picks may reflect documented forfeitures. Later-round
+counts can vary; the total is not hard-coded to 257.
+
+From `backend`:
+
+```powershell
+# Preview: no database writes.
+..\.venv\Scripts\python.exe -m app.jobs.draft_order import --snapshot ..\data\prospects\order.json
+# Persist source facts, still inactive.
+..\.venv\Scripts\python.exe -m app.jobs.draft_order import --snapshot ..\data\prospects\order.json --commit
+# Separate operator approval activates this version for new mocks.
+..\.venv\Scripts\python.exe -m app.jobs.draft_order approve --snapshot-id order-REPORTED_ID --reviewer "Reviewer name"
+```
+
+Exact dated imports are idempotent. Source facts are not overwritten by these
+commands; approval records the first reviewer's name and timestamp. There is no
+public approval endpoint. The latest **collected**, approved snapshot for the
+season wins, even if older snapshots are imported/approved afterward. Approval
+does not override chronological selection. Newer unapproved snapshots do not
+affect mocks.
+
+New first-round mocks copy the selected snapshot's first-round owner list and
+provenance (source, date, projected/final status, snapshot ID, starting order).
+Repeated owners and teams with no first-round selection are supported. Later
+rounds may be archived but are not simulated. Existing runs never reread the
+latest source order; in-simulation trades change only that run's copied order,
+not its provenance or the source snapshot. The draft UI labels source status.
+Without an approved snapshot, the existing reference team order is preserved
+and explicitly labeled as a fallback, not presented as an official projection.
+Pre-existing drafts report legacy provenance rather than inventing a source.

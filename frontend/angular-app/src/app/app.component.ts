@@ -83,6 +83,7 @@ interface DraftStateResponse {
     season_year: number;
     status: string;
     draft_order: string[];
+    order_provenance: { kind: string; label: string; order_status?: string; collected_at?: string };
   };
   current_pick_number: number;
   current_team_id: string;

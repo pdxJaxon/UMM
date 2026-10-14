@@ -393,6 +393,25 @@ class PlayerAthleticScoreRecord(Base):
     player = relationship("PlayerRecord", back_populates="athletic_scores")
 
 
+class DraftOrderSnapshotRecord(Base):
+    """Dated pick ownership; approval is separate from immutable source facts."""
+
+    __tablename__ = "draft_order_snapshots"
+
+    id = Column(String(64), primary_key=True)
+    content_hash = Column(String(64), nullable=False, unique=True)
+    draft_year = Column(Integer, nullable=False, index=True)
+    collected_at = Column(DateTime, nullable=False)
+    source_name = Column(String(100), nullable=False)
+    source_url = Column(String(500), nullable=False)
+    order_status = Column(String(20), nullable=False)
+    scope = Column(String(20), nullable=False)
+    expected_round_counts = Column(JSON, nullable=False)
+    picks = Column(JSON, nullable=False)
+    approved_at = Column(DateTime, nullable=True)
+    approved_by = Column(String(150), nullable=True)
+
+
 class DraftRunRecord(Base):
     """Persisted user-owned mock draft session."""
 
@@ -409,6 +428,7 @@ class DraftRunRecord(Base):
     overall_randomness = Column(Numeric(5, 2), nullable=False, default=50)
     randomness_overrides = Column(JSON, nullable=False, default=dict)
     draft_order = Column(JSON, nullable=False, default=list)
+    order_provenance = Column(JSON, nullable=False, default=dict)
     user = relationship("UserRecord", back_populates="drafts")
     picks = relationship("DraftPickRecord", back_populates="draft_run", cascade="all, delete-orphan")
     trades = relationship("DraftTradeRecord", back_populates="draft_run", cascade="all, delete-orphan")

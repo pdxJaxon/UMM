@@ -13,6 +13,7 @@ from app.services.llm_prediction import OpenAICompatiblePredictionProvider, Pred
 from app.services.leadership_tendencies import get_effective_tendencies
 from app.services.ranking_service import select_with_team_randomness
 from app.services.trade_engine import evaluate_trade
+from app.services.draft_order_snapshots import starting_order
 
 TEAM_ORDER = tuple(f"team-{number}" for number in range(1, 33))
 
@@ -43,9 +44,7 @@ class DraftRepository:
             raise ValueError("Overall randomness must be between 0 and 100")
         if any(not 0 <= float(value) <= 100 for value in overrides.values()):
             raise ValueError("Randomness overrides must be between 0 and 100")
-        team_order = [team.id for team in self.session.scalars(select(TeamRecord).order_by(TeamRecord.draft_order))]
-        if controlled_team_id not in team_order:
-            raise ValueError("Controlled team does not have a draft position")
+        team_order, provenance = starting_order(self.session, draft_year)
         eligible_prospects = self.session.scalar(
             select(func.count()).select_from(PlayerRecord).where(
                 PlayerRecord.draft_year == draft_year,
@@ -57,7 +56,7 @@ class DraftRepository:
         draft = DraftRunRecord(
             id=self._next_id("draft"), user_id=user_id, controlled_team_id=controlled_team_id,
             draft_year=draft_year, status="drafting", overall_randomness=overall_randomness,
-            randomness_overrides=overrides, draft_order=team_order,
+            randomness_overrides=overrides, draft_order=team_order, order_provenance=provenance,
         )
         self.session.add(draft)
         self.session.flush()
@@ -179,6 +178,9 @@ class DraftRepository:
                 "overall_randomness": float(draft.overall_randomness),
                 "randomness_overrides": draft.randomness_overrides,
                 "draft_order": self._draft_order(draft),
+                "order_provenance": draft.order_provenance or {
+                    "kind": "legacy", "label": "Saved legacy draft order",
+                },
             },
             "current_pick_number": len(picks) + 1,
             "current_team_id": self.current_team_id(len(picks), self._draft_order(draft)),
@@ -221,10 +223,7 @@ class DraftRepository:
         proposal = evaluate_trade(order, pick_index, tendencies)
         if proposal is None:
             return None
-        later_index = next(
-            index for index in range(pick_index + 1, len(order))
-            if order[index] == proposal.moving_up_team_id
-        )
+        later_index = proposal.acquired_pick_number - 1
         order[pick_index], order[later_index] = order[later_index], order[pick_index]
         draft.draft_order = order
         trade_number = len(self._ordered_trades(draft.id)) + 1

@@ -95,6 +95,9 @@ def initialize_schema() -> None:
                     text("ALTER TABLE users ADD COLUMN favorite_team_id VARCHAR(64) REFERENCES teams(id)")
                 )
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_favorite_team_id ON users(favorite_team_id)"))
+            draft_columns = {column["name"] for column in inspect(connection).get_columns("draft_runs")}
+            if "order_provenance" not in draft_columns:
+                connection.execute(text("ALTER TABLE draft_runs ADD COLUMN order_provenance JSON NOT NULL DEFAULT '{}'"))
 
 
 def seed_reference_data(session: Session) -> None:

@@ -31,6 +31,7 @@ def test_database_schema_contains_core_tables() -> None:
         "player_athletic_scores",
         "player_derogatory_concerns",
         "draft_runs",
+        "draft_order_snapshots",
         "draft_picks",
         "draft_trades",
         "historical_draft_trades",

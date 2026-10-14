@@ -50,6 +50,8 @@ def evaluate_trade(
     best: TradeProposal | None = None
     for later_index in range(pick_index + 1, len(order)):
         moving_up_team_id = order[later_index]
+        if moving_up_team_id == moving_down_team_id:
+            continue
         up_signal = _direction_signal(tendencies_by_team.get(moving_up_team_id, ()), "trade_up")
         if up_signal is None:
             continue
