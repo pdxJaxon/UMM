@@ -166,10 +166,8 @@ class DraftTradeHistoryIngestionService:
             counts[(event.moving_down_team_id, None, None)]["trade_down"] += 1
             if event.general_manager_id:
                 counts[(event.moving_up_team_id, "gm", event.general_manager_id)]["trade_up"] += 1
-                counts[(event.moving_down_team_id, "gm", event.general_manager_id)]["trade_down"] += 1
             if event.head_coach_id:
                 counts[(event.moving_up_team_id, "head_coach", event.head_coach_id)]["trade_up"] += 1
-                counts[(event.moving_down_team_id, "head_coach", event.head_coach_id)]["trade_down"] += 1
         for (team_id, actor_type, actor_id), directions in counts.items():
             total = directions["trade_up"] + directions["trade_down"]
             for tendency_type, count in directions.items():
