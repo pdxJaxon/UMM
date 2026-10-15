@@ -14,7 +14,7 @@ from app.db.models import (
     ProspectSourceIdentityRecord,
 )
 from app.services.pff_snapshot import (
-    PFFBoardSnapshot, PFFProspectRow, POSITION_MAP, SOURCE_NAME, canonical_school, normalized_name,
+    PFFBoardSnapshot, PFFProspectRow, POSITION_MAP, canonical_school, normalized_name,
 )
 
 
@@ -45,7 +45,9 @@ def resolve_identities(
     aliases = {
         identity.source_key: identity
         for identity in session.scalars(
-            select(ProspectSourceIdentityRecord).where(ProspectSourceIdentityRecord.source_name == SOURCE_NAME)
+            select(ProspectSourceIdentityRecord).where(
+                ProspectSourceIdentityRecord.source_name == snapshot.source
+            )
         )
     }
     snapshot_names: dict[str, int] = {}
@@ -75,7 +77,7 @@ def resolve_identities(
             if player is not None and player.college_id != college_id:
                 raise ValueError(f"School changed for {row.name}; review transfer/identity and provide an override")
             player_id = player.id if player is not None else (
-                "prospect-" + uuid5(NAMESPACE_URL, f"umm:{SOURCE_NAME}:{row.key}").hex
+                "prospect-" + uuid5(NAMESPACE_URL, f"umm:{snapshot.source}:{row.key}").hex
             )
             if player is None and player_id in by_id:
                 raise ValueError(f"Generated player ID already exists for {row.name}; review identity")
@@ -122,7 +124,7 @@ def import_board_snapshot(
     snapshot_id = "board-snapshot-" + uuid4().hex
     with session.begin_nested():
         session.add(ProspectBoardSnapshotRecord(
-            id=snapshot_id, content_hash=fingerprint, source_name=SOURCE_NAME,
+            id=snapshot_id, content_hash=fingerprint, source_name=snapshot.source,
             source_url=snapshot.source_url, draft_year=snapshot.draft_year,
             collected_at=snapshot.collected_at.astimezone(UTC).replace(tzinfo=None),
             source_updated_at_display=snapshot.source_updated_at_display,
@@ -140,12 +142,12 @@ def import_board_snapshot(
         session.flush()
         for entry in entries:
             alias = session.scalar(select(ProspectSourceIdentityRecord).where(
-                ProspectSourceIdentityRecord.source_name == SOURCE_NAME,
+                ProspectSourceIdentityRecord.source_name == snapshot.source,
                 ProspectSourceIdentityRecord.source_key == entry.row.key,
             ))
             if alias is None:
                 session.add(ProspectSourceIdentityRecord(
-                    source_name=SOURCE_NAME, source_key=entry.row.key,
+                    source_name=snapshot.source, source_key=entry.row.key,
                     player_id=entry.player_id, source_record_id=entry.row.source_record_id,
                 ))
             session.add(ProspectBoardRankingRecord(
