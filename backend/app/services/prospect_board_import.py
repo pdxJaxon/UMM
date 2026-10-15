@@ -64,6 +64,10 @@ def resolve_identities(
         override = overrides.get(row.key)
         if alias is not None and override is not None and alias.player_id != override:
             raise ValueError(f"Override conflicts with existing source mapping for {row.name}")
+        if alias is not None and (
+            alias.reviewed_name != normalized_name(row.name) or alias.reviewed_school != college_id
+        ) and override is None:
+            raise ValueError(f"Source identity changed for {row.name}; review the name/school and provide an override")
         player_id = override or (alias.player_id if alias is not None else None)
         if player_id is not None:
             player = by_id.get(player_id)
@@ -149,7 +153,11 @@ def import_board_snapshot(
                 session.add(ProspectSourceIdentityRecord(
                     source_name=snapshot.source, source_key=entry.row.key,
                     player_id=entry.player_id, source_record_id=entry.row.source_record_id,
+                    reviewed_name=normalized_name(entry.row.name), reviewed_school=entry.college_id,
                 ))
+            else:
+                alias.reviewed_name = normalized_name(entry.row.name)
+                alias.reviewed_school = entry.college_id
             session.add(ProspectBoardRankingRecord(
                 snapshot_id=snapshot_id, player_id=entry.player_id,
                 overall_rank=entry.row.overall_rank, pff_grade=entry.row.pff_grade,

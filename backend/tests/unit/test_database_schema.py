@@ -88,6 +88,12 @@ def test_initialize_schema_upgrades_previous_sqlite_schema(monkeypatch) -> None:
         )
         """,
         """
+        CREATE TABLE prospect_source_identities (
+            id INTEGER PRIMARY KEY, source_name VARCHAR(100) NOT NULL, source_key VARCHAR(160) NOT NULL,
+            player_id VARCHAR(64) NOT NULL, source_record_id VARCHAR(150)
+        )
+        """,
+        """
         CREATE TABLE team_drafting_tendencies (
             id INTEGER PRIMARY KEY, team_id VARCHAR(64) NOT NULL, draft_year INTEGER,
             tendency_type VARCHAR(40) NOT NULL, position_code VARCHAR(20), metric_name VARCHAR(60),
@@ -184,6 +190,7 @@ def test_initialize_schema_upgrades_previous_sqlite_schema(monkeypatch) -> None:
         },
         "draft_runs": {"randomness_overrides", "overall_randomness", "draft_order"},
         "draft_picks": {"randomness_factor", "prediction_metadata"},
+        "prospect_source_identities": {"reviewed_name", "reviewed_school"},
     }
     inspector = inspect(engine)
     for table_name, expected in expected_columns.items():

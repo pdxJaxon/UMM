@@ -115,6 +115,10 @@ def initialize_schema() -> None:
                 "randomness_factor": "NUMERIC(5, 2) NOT NULL DEFAULT 0",
                 "prediction_metadata": "JSON NOT NULL DEFAULT '{}'",
             },
+            "prospect_source_identities": {
+                "reviewed_name": "VARCHAR(200)",
+                "reviewed_school": "VARCHAR(100)",
+            },
         }
         with engine.begin() as connection:
             for table_name, additions in sqlite_columns.items():

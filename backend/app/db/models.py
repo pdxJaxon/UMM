@@ -296,6 +296,8 @@ class ProspectSourceIdentityRecord(Base):
     source_key = Column(String(160), nullable=False)
     player_id = Column(String(64), ForeignKey("players.id"), nullable=False, index=True)
     source_record_id = Column(String(150), nullable=True)
+    reviewed_name = Column(String(200), nullable=True)
+    reviewed_school = Column(String(100), nullable=True)
 
 
 class ProspectBoardSnapshotRecord(Base):
