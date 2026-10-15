@@ -12,6 +12,7 @@ from app.services.historical_backtest import (
     FileProspectSource,
     HistoricalDraftDataset,
     NflverseHistoricalDatasetProvider,
+    build_deterministic_replay,
     run_historical_backtest,
 )
 
@@ -36,10 +37,12 @@ def run_pilot(
         )
     datasets: list[HistoricalDraftDataset] = provider.load(years)
 
-    def predictor(year: int, team_id: str, dataset: HistoricalDraftDataset):
-        from app.services.historical_backtest import build_deterministic_replay
+    replays = {}
 
-        return build_deterministic_replay(dataset).get(team_id, ())
+    def predictor(year: int, team_id: str, dataset: HistoricalDraftDataset):
+        if id(dataset) not in replays:
+            replays[id(dataset)] = build_deterministic_replay(dataset)
+        return replays[id(dataset)].get(team_id, ())
 
     result = run_historical_backtest(datasets, predictor, allow_unmatched_actuals=True)
     return {

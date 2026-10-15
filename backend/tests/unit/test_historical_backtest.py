@@ -16,6 +16,7 @@ from app.services.historical_backtest import (
     NflverseHistoricalDatasetProvider,
     run_historical_backtest,
 )
+import app.jobs.run_historical_backtest as backtest_job
 from app.jobs.run_historical_backtest import run_pilot
 
 
@@ -54,6 +55,20 @@ def test_backtest_rejects_post_draft_information() -> None:
     """A snapshot after April cannot be used to claim pre-draft accuracy."""
     with pytest.raises(ValueError, match="observed after"):
         run_historical_backtest([_dataset(as_of=date(2024, 5, 1))], lambda *_: [])
+
+
+def test_backtest_accepts_late_pre_draft_snapshot() -> None:
+    """Snapshots remain valid until the actual season draft begins."""
+    dataset = _dataset(as_of=date(2024, 4, 10))
+
+    result = run_historical_backtest([dataset], lambda *_: [{"pick_number": 1, "player_id": "player-a"}])
+
+    assert result.aggregate["exact_pick_rate"] == 100.0
+
+
+def test_backtest_rejects_snapshot_from_draft_start_date() -> None:
+    with pytest.raises(ValueError, match="observed after"):
+        run_historical_backtest([_dataset(as_of=date(2024, 4, 25))], lambda *_: [])
 
 
 def test_backtest_rejects_actual_players_missing_from_snapshot() -> None:
@@ -193,6 +208,21 @@ def test_file_provider_loads_and_filters_normalized_snapshots(tmp_path) -> None:
     assert isinstance(snapshots[0].actual_picks["team-1"], tuple)
 
 
+def test_file_provider_loads_standalone_snapshot_object(tmp_path) -> None:
+    path = tmp_path / "historical-dataset.json"
+    path.write_text(json.dumps({
+        "draft_year": 2024,
+        "as_of": "2024-04-10",
+        "prospects": [{"player_id": "player-a"}],
+    }), encoding="utf-8")
+
+    snapshots = FileHistoricalDraftDatasetProvider(path).load()
+
+    assert len(snapshots) == 1
+    assert snapshots[0].draft_year == 2024
+    assert snapshots[0].as_of == date(2024, 4, 10)
+
+
 def test_deterministic_replay_scores_needs_and_removes_selected_players() -> None:
     """Replay should use team needs and never select the same player twice."""
     dataset = HistoricalDraftDataset(
@@ -261,6 +291,32 @@ def test_pilot_returns_accuracy_and_input_coverage() -> None:
         "teams_with_staff": 1,
         "teams_with_tendencies": 0,
     }]
+
+
+def test_pilot_builds_one_replay_per_dataset(monkeypatch) -> None:
+    dataset = HistoricalDraftDataset(
+        draft_year=2024,
+        as_of=date(2024, 3, 1),
+        team_needs={},
+        prospects=({"player_id": "player-a"},),
+        team_staff={},
+        actual_picks={
+            "team-1": ({"pick_number": 1, "player_id": "player-a"},),
+            "team-2": ({"pick_number": 2, "player_id": "player-a"},),
+        },
+    )
+    original_replay = backtest_job.build_deterministic_replay
+    calls = []
+
+    def counted_replay(snapshot):
+        calls.append(snapshot)
+        return original_replay(snapshot)
+
+    monkeypatch.setattr(backtest_job, "build_deterministic_replay", counted_replay)
+
+    run_pilot([2024], type("Provider", (), {"load": lambda _self, _years: [dataset]})())
+
+    assert calls == [dataset]
 
 
 def test_file_draft_picks_provider_reads_parquet_seasons(tmp_path) -> None:
