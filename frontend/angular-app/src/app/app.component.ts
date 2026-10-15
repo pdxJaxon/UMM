@@ -145,6 +145,7 @@ export class AppComponent implements OnInit {
   protected draftError: string | null = null;
   protected draftBusy = false;
   protected draftSelectedPlayerId = '';
+  private draggedPlayerId: string | null = null;
 
   private readonly apiBase = 'http://localhost:8000';
   private accessToken = '';
@@ -610,16 +611,52 @@ this.activeEntry = null;
   }
 
   protected moveEntry(index: number, direction: -1 | 1): void {
-    const target = index + direction;
-    if (target < 0 || target >= this.entries.length) return;
-    if (this.boardMode !== 'personal') return;
+    this.reorderEntries(index, index + direction);
+  }
+
+  protected startEntryDrag(event: DragEvent, entry: BoardEntry): void {
+    if (this.boardMode !== 'personal' || this.draftId) {
+      event.preventDefault();
+      return;
+    }
+    this.draggedPlayerId = entry.player_id;
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', entry.player_id);
+    }
+  }
+
+  protected allowEntryDrop(event: DragEvent): void {
+    if (this.boardMode !== 'personal' || this.draftId || !this.draggedPlayerId) return;
+    event.preventDefault();
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
+  }
+
+  protected dropEntry(event: DragEvent, targetIndex: number): void {
+    event.preventDefault();
+    const playerId = this.draggedPlayerId;
+    this.draggedPlayerId = null;
+    if (this.boardMode !== 'personal' || this.draftId || !playerId) return;
+    const sourceIndex = this.entries.findIndex((entry) => entry.player_id === playerId);
+    this.reorderEntries(sourceIndex, targetIndex);
+  }
+
+  protected endEntryDrag(): void {
+    this.draggedPlayerId = null;
+  }
+
+  private reorderEntries(sourceIndex: number, targetIndex: number): void {
+    if (this.boardMode !== 'personal' || this.draftId) return;
+    if (sourceIndex < 0 || sourceIndex >= this.entries.length) return;
+    if (targetIndex < 0 || targetIndex >= this.entries.length || sourceIndex === targetIndex) return;
     const selectedPlayerId = this.activeEntry?.player_id ?? null;
     const next = [...this.entries];
-    [next[index], next[target]] = [next[target], next[index]];
+    const [movedEntry] = next.splice(sourceIndex, 1);
+    next.splice(targetIndex, 0, movedEntry);
     this.entries = next.map((entry, position) => ({ ...entry, rank: position + 1 }));
     this.activeEntry = selectedPlayerId
-      ? this.entries.find((entry) => entry.player_id === selectedPlayerId) ?? this.entries[target] ?? null
-      : this.entries[target] ?? null;
+      ? this.entries.find((entry) => entry.player_id === selectedPlayerId) ?? this.entries[targetIndex] ?? null
+      : this.entries[targetIndex] ?? null;
   }
 
   private completeAuthentication(response: AuthResponse, message: string): void {

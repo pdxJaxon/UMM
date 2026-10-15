@@ -703,7 +703,7 @@ label,
 
 .board-row {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 74px 28px 28px;
+  grid-template-columns: 42px minmax(0, 1fr) 74px 28px;
   gap: 12px;
   align-items: center;
   padding: 18px 20px;
@@ -714,6 +714,14 @@ label,
 .board-row:hover,
 .board-row.selected {
   background: color-mix(in srgb, var(--team-secondary) 9%, #f8faf8);
+}
+
+.board-row.reorderable {
+  cursor: grab;
+}
+
+.board-row.reorderable:active {
+  cursor: grabbing;
 }
 
 .rank {
@@ -776,6 +784,11 @@ label,
   height: 28px;
   border: 0;
   background: #e9efeb;
+}
+
+.move-controls {
+  display: grid;
+  gap: 4px;
 }
 
 .move:disabled {
@@ -1014,7 +1027,7 @@ label,
   }
 
   .board-row {
-    grid-template-columns: 30px minmax(0, 1fr) 62px 25px 25px;
+    grid-template-columns: 30px minmax(0, 1fr) 62px 25px;
     padding: 16px 12px;
   }
 
@@ -1024,5 +1037,10 @@ label,
 
   .prospect strong {
     font-size: 15px;
+  }
+
+  .move {
+    width: 25px;
+    height: 25px;
   }
 }

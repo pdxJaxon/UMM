@@ -65,7 +65,7 @@
         <p class="subhead">Every rank is a conversation between talent, need, tendencies, and evidence.</p>
       </div>
       <div class="board-action">
-        <span>{{ boardMode === 'personal' ? 'Reorder with the arrows, then save.' : 'Start with the team model, then make it yours.' }}</span>
+        <span>{{ boardMode === 'personal' ? 'Reorder with the arrows or drag prospects, then save.' : 'Start with the team model, then make it yours.' }}</span>
         <button class="action primary" (click)="completeBoardAction()" [disabled]="!boardActionEnabled || !!draftId">{{ boardActionLabel }}</button>
       </div>
     </section>
@@ -190,7 +190,7 @@
         <div *ngIf="loading" class="api-loading">Loading board…</div>
 
         <div class="board-list" *ngIf="!loading && !error">
-          <article class="board-row" *ngFor="let entry of entries; let i = index" role="group" [class.selected]="activeEntry?.player_id === entry.player_id" (click)="selectEntry(entry)">
+          <article class="board-row" *ngFor="let entry of entries; let i = index" role="group" [class.selected]="activeEntry?.player_id === entry.player_id" [class.reorderable]="boardMode === 'personal' && !draftId" [draggable]="boardMode === 'personal' && !draftId" (dragstart)="startEntryDrag($event, entry)" (dragover)="allowEntryDrop($event)" (drop)="dropEntry($event, i)" (dragend)="endEntryDrag()" (click)="selectEntry(entry)">
             <span class="rank">{{ entry.rank | number:'2.0-0' }}</span>
             <div class="prospect" role="button" tabindex="0" [attr.aria-label]="'Inspect ' + entry.name" (keydown.enter)="selectEntry(entry)" (keydown.space)="selectEntry(entry); $event.preventDefault()">
               <strong>{{ entry.name }}</strong>
@@ -201,8 +201,10 @@
               <span>Fit <b>{{ entry.fit | number:'1.0-0' }}</b></span>
             </div>
             <span class="score">{{ entry.score | number:'1.1-1' }}<small>UMM</small></span>
-            <button class="move" title="Move prospect up" aria-label="Move prospect up" (click)="$event.stopPropagation(); moveEntry(i, -1)" [disabled]="!!draftId || boardMode !== 'personal' || i === 0">↑</button>
-            <button class="move" title="Move prospect down" aria-label="Move prospect down" (click)="$event.stopPropagation(); moveEntry(i, 1)" [disabled]="!!draftId || boardMode !== 'personal' || i === entries.length - 1">↓</button>
+            <div class="move-controls" role="group" [attr.aria-label]="'Reorder ' + entry.name">
+              <button class="move" title="Move prospect up" aria-label="Move prospect up" (click)="$event.stopPropagation(); moveEntry(i, -1)" [disabled]="!!draftId || boardMode !== 'personal' || i === 0">↑</button>
+              <button class="move" title="Move prospect down" aria-label="Move prospect down" (click)="$event.stopPropagation(); moveEntry(i, 1)" [disabled]="!!draftId || boardMode !== 'personal' || i === entries.length - 1">↓</button>
+            </div>
           </article>
         </div>
       </div>
