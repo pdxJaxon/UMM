@@ -1,4 +1,4 @@
-"""FBS college football reference data for draft prospect relationships."""
+"""College football reference data for draft prospect relationships."""
 
 import re
 
@@ -43,4 +43,14 @@ COLLEGES = tuple(
         ("FBS Independent", ("Connecticut",)),
     )
     for record in _records(conference, names)
+) + (
+    {
+        "id": "youngstown-state",
+        "name": "Youngstown State",
+        "abbreviation": "youngstown-state",
+        "conference": "Missouri Valley Football Conference",
+        "division": "FCS",
+        "logo_url": "",
+        "official_url": "https://ysusports.com/sports/football",
+    },
 )

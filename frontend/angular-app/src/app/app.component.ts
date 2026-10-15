@@ -8,6 +8,7 @@ interface TeamOption {
   name: string;
   abbreviation: string;
   logo_url: string;
+  randomness_score: number;
 }
 
 interface TeamColors {
@@ -74,6 +75,32 @@ interface TeamBoardResponse {
   entries: TeamBoardEntryPayload[];
 }
 
+interface DraftStateResponse {
+  draft_run: {
+    id: string;
+    controlled_team_id: string;
+    season_year: number;
+    status: string;
+    draft_order: string[];
+  };
+  current_pick_number: number;
+  current_team_id: string;
+  picks: Array<{
+    id: string;
+    pick_number: number;
+    team_id: string;
+    player_id: string;
+    selection_source: string;
+    prediction_metadata: Record<string, unknown>;
+  }>;
+  trades: Array<{
+    id: string;
+    pick_number: number;
+    moving_up_team_id: string;
+    moving_down_team_id: string;
+  }>;
+}
+
 interface AuthResponse {
   id: string;
   email: string;
@@ -109,6 +136,15 @@ export class AppComponent implements OnInit {
   protected favoriteTeamMessage: string | null = null;
   protected savingFavoriteTeam = false;
   protected boardVersion: number | null = null;
+  protected overallRandomness = 50;
+  protected teamRandomnessOverrides: Record<string, number> = {};
+  protected draftRunMessage: string | null = null;
+  protected startingDraft = false;
+  protected draftState: DraftStateResponse | null = null;
+  protected draftId: string | null = null;
+  protected draftError: string | null = null;
+  protected draftBusy = false;
+  protected draftSelectedPlayerId = '';
 
   private readonly apiBase = 'http://localhost:8000';
   private accessToken = '';
@@ -121,7 +157,7 @@ export class AppComponent implements OnInit {
     this.http.get<TeamOption[]>(`${this.apiBase}/api/teams`).subscribe({
       next: (teams) => {
         this.teams = teams;
-        if (teams.length > 0) {
+        if (this.isAuthenticated && teams.length > 0) {
           const previousTeamId = this.selectedTeamId;
           this.selectedTeamId = this.preferredTeamId && teams.some((team) => team.id === this.preferredTeamId)
             ? this.preferredTeamId
@@ -150,7 +186,40 @@ export class AppComponent implements OnInit {
   }
 
   protected get selectedTeamColors(): TeamColors {
+    if (!this.isAuthenticated) {
+      return { primary: '#e65734', secondary: '#1d2a2d' };
+    }
     return TEAM_COLORS[this.selectedTeamAbbreviation] ?? { primary: '#e65734', secondary: '#1d2a2d' };
+  }
+
+  protected get selectedTeamRandomness(): number {
+    const override = this.teamRandomnessOverrides[this.selectedTeamId];
+    return override ?? this.teams.find((team) => team.id === this.selectedTeamId)?.randomness_score ?? 50;
+  }
+
+  protected get draftCandidates(): BoardEntry[] {
+    const selectedPlayers = new Set(this.draftState?.picks.map((pick) => pick.player_id) ?? []);
+    return this.entries.filter((entry) => !selectedPlayers.has(entry.player_id));
+  }
+
+  protected get draftOnControlledTeam(): boolean {
+    return !!this.draftState
+      && this.draftState.draft_run.status === 'drafting'
+      && this.draftState.current_team_id === this.draftState.draft_run.controlled_team_id;
+  }
+
+  protected get currentDraftTeamName(): string {
+    return this.teamName(this.draftState?.current_team_id ?? '');
+  }
+
+  protected teamName(teamId: string): string {
+    const team = this.teams.find((candidate) => candidate.id === teamId);
+    return team?.name ?? teamId;
+  }
+
+  protected setSelectedTeamRandomness(value: number): void {
+    if (!this.selectedTeamId) return;
+    this.teamRandomnessOverrides = { ...this.teamRandomnessOverrides, [this.selectedTeamId]: Number(value) };
   }
 
   protected get isAuthenticated(): boolean {
@@ -373,6 +442,17 @@ export class AppComponent implements OnInit {
     this.favoriteTeamMessage = null;
     this.favoriteTeamId = '';
     this.preferredTeamId = null;
+this.selectedTeamId = '';
+this.overallRandomness = 50;
+this.teamRandomnessOverrides = {};
+this.draftRunMessage = null;
+  this.draftState = null;
+  this.draftId = null;
+  this.draftError = null;
+  this.draftBusy = false;
+  this.draftSelectedPlayerId = '';
+this.entries = [];
+this.activeEntry = null;
     this.boardId = null;
     this.boardVersion = null;
     this.authMessage = 'Signed out.';
@@ -424,6 +504,111 @@ export class AppComponent implements OnInit {
     this.generateBoard();
   }
 
+  protected startMockDraft(): void {
+    if (!this.ensureAuthenticated('Sign in before starting a mock draft.')) return;
+    if (!this.entries.length) {
+      this.draftRunMessage = 'Generate or load a team board before starting a mock draft.';
+      return;
+    }
+    this.startingDraft = true;
+    this.draftRunMessage = null;
+    this.draftError = null;
+    const overrides = this.teamRandomnessOverrides[this.selectedTeamId] === undefined
+      ? {}
+      : { [this.selectedTeamId]: this.teamRandomnessOverrides[this.selectedTeamId] };
+    this.http.post<{ draft_run_id: string }>(
+      `${this.apiBase}/api/drafts`,
+      {
+        controlled_team_id: this.selectedTeamId,
+        draft_year: this.draftYear,
+        overall_randomness: this.overallRandomness,
+        randomness_overrides: overrides
+      },
+      this.requestOptions(true)
+    ).subscribe({
+      next: (response) => {
+        this.startingDraft = false;
+        this.draftId = response.draft_run_id;
+        this.draftRunMessage = `Mock draft ${response.draft_run_id} started.`;
+        this.advanceDraft(response.draft_run_id);
+      },
+      error: (error: HttpErrorResponse) => {
+        this.startingDraft = false;
+        this.draftId = null;
+        this.draftRunMessage = this.describeApiError(error, 'Unable to start the mock draft.');
+      }
+    });
+  }
+
+  protected submitDraftPick(): void {
+    const state = this.draftState;
+    if (!state || !this.draftOnControlledTeam || !this.draftSelectedPlayerId || this.draftBusy) return;
+
+    this.draftBusy = true;
+    this.draftError = null;
+    this.http.post<DraftStateResponse>(
+      `${this.apiBase}/api/drafts/${state.draft_run.id}/picks`,
+      { team_id: state.draft_run.controlled_team_id, player_id: this.draftSelectedPlayerId },
+      this.requestOptions(true)
+    ).subscribe({
+      next: (updatedState) => {
+        this.setDraftState(updatedState);
+        this.advanceDraft(updatedState.draft_run.id);
+      },
+      error: (error: HttpErrorResponse) => {
+        this.draftBusy = false;
+        this.draftError = this.describeApiError(error, 'Unable to submit your pick.');
+      }
+    });
+  }
+
+  protected simulateToUserPick(): void {
+    const draftId = this.draftState?.draft_run.id ?? this.draftId;
+    if (!draftId || this.draftBusy) return;
+    this.advanceDraft(draftId);
+  }
+
+  protected closeDraft(): void {
+    if (this.draftState?.draft_run.status !== 'completed') return;
+    this.draftState = null;
+    this.draftId = null;
+    this.draftError = null;
+    this.draftSelectedPlayerId = '';
+    this.draftRunMessage = null;
+  }
+
+  protected draftPlayerName(playerId: string): string {
+    return this.entries.find((entry) => entry.player_id === playerId)?.name ?? playerId;
+  }
+
+  private advanceDraft(draftId: string): void {
+    this.draftBusy = true;
+    this.draftError = null;
+    this.http.post<DraftStateResponse>(
+      `${this.apiBase}/api/drafts/${draftId}/auto-simulate`,
+      {},
+      this.requestOptions(true)
+    ).subscribe({
+      next: (state) => {
+        this.setDraftState(state);
+        this.draftBusy = false;
+      },
+      error: (error: HttpErrorResponse) => {
+        this.draftBusy = false;
+        this.draftError = this.describeApiError(error, 'Unable to advance the draft.');
+      }
+    });
+  }
+
+  private setDraftState(state: DraftStateResponse): void {
+    this.draftState = state;
+    this.draftId = state.draft_run.id;
+    const available = this.entries.filter((entry) => !state.picks.some((pick) => pick.player_id === entry.player_id));
+    if (!available.some((entry) => entry.player_id === this.draftSelectedPlayerId)) {
+      this.draftSelectedPlayerId = available[0]?.player_id ?? '';
+    }
+  }
+
   protected moveEntry(index: number, direction: -1 | 1): void {
     const target = index + direction;
     if (target < 0 || target >= this.entries.length) return;
@@ -451,13 +636,16 @@ export class AppComponent implements OnInit {
   }
 
   private applyPreferredTeam(): void {
-    if (!this.preferredTeamId || !this.teams.some((team) => team.id === this.preferredTeamId)) {
+    const nextTeamId = this.preferredTeamId && this.teams.some((team) => team.id === this.preferredTeamId)
+      ? this.preferredTeamId
+      : this.selectedTeamId || this.teams[0]?.id;
+    if (!nextTeamId) {
       return;
     }
-    if (this.selectedTeamId === this.preferredTeamId && this.entries.length) {
+    if (this.selectedTeamId === nextTeamId && this.entries.length) {
       return;
     }
-    this.selectedTeamId = this.preferredTeamId;
+    this.selectedTeamId = nextTeamId;
     this.boardMode = 'default';
     this.loadBoard();
   }
