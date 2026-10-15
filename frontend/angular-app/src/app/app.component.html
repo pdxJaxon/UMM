@@ -5,6 +5,11 @@
     <button class="profile" [attr.aria-label]="isAuthenticated ? 'Sign out' : 'Account controls'" (click)="isAuthenticated && logout()">{{ isAuthenticated ? 'ON' : 'UM' }}</button>
   </header>
 
+  <aside class="prospect-notice" aria-label="Projected prospect information">
+    <strong>Projected prospects</strong>
+    Player inclusion does not confirm draft eligibility or declaration. Individual player status and rankings may change as new information becomes available.
+  </aside>
+
   <section class="account-bar" aria-label="Account controls">
     <ng-container *ngIf="!isAuthenticated; else signedIn">
       <div class="account-copy">

@@ -6,6 +6,7 @@ import hashlib
 import json
 import unicodedata
 from datetime import UTC, datetime
+from typing import ClassVar
 from urllib.parse import parse_qs, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -48,12 +49,12 @@ def canonical_school(value: str) -> str:
     schools.update({row["id"]: row["id"] for row in COLLEGES})
     school_id = SCHOOL_ALIASES.get(key) or schools.get(key)
     if school_id is None:
-        raise ValueError(f"Unknown PFF school {value!r}; add a reviewed school mapping")
+        raise ValueError(f"Unknown prospect school {value!r}; add a reviewed school mapping")
     return school_id
 
 
-class PFFProspectRow(BaseModel):
-    """Factual row fields exposed by the rendered PFF board."""
+class ProspectRow(BaseModel):
+    """Factual identity and ranking fields from an external prospect board."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, allow_inf_nan=False, frozen=True)
 
@@ -77,12 +78,16 @@ class PFFProspectRow(BaseModel):
         return source_key(self.name, self.school, self.source_record_id)
 
 
-class PFFBoardSnapshot(BaseModel):
-    """Dated source data; validation does not imply declared draft eligibility."""
+PFFProspectRow = ProspectRow
+
+
+class BoardSnapshot(BaseModel):
+    """Source-neutral dated board; inclusion does not imply draft eligibility."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, frozen=True)
+    position_map: ClassVar[dict[str, str]] = POSITION_MAP
 
-    source: str = SOURCE_NAME
+    source: str = Field(min_length=1, max_length=100)
     source_url: str = Field(max_length=500)
     draft_year: int = Field(strict=True, ge=2020, le=2100)
     collected_at: datetime
@@ -92,7 +97,7 @@ class PFFBoardSnapshot(BaseModel):
     grade_definition: str | None = None
     identity_note: str | None = None
     data_quality: dict[str, object] | None = None
-    prospects: tuple[PFFProspectRow, ...] = Field(min_length=1)
+    prospects: tuple[ProspectRow, ...] = Field(min_length=1)
 
     @field_validator("collected_at")
     @classmethod
@@ -102,21 +107,16 @@ class PFFBoardSnapshot(BaseModel):
         return value.astimezone(UTC)
 
     @model_validator(mode="after")
-    def validate_board(self) -> "PFFBoardSnapshot":
-        """Reject wrong seasons, duplicate identities, and partial/gapped rank ranges."""
-        parsed = urlparse(self.source_url)
-        if self.source != SOURCE_NAME or parsed.scheme != "https" or parsed.netloc != "www.pff.com":
-            raise ValueError("Expected an HTTPS www.pff.com Big Board source")
-        if parsed.path != "/draft/big-board" or parse_qs(parsed.query).get("season") != [str(self.draft_year)]:
-            raise ValueError("Source URL season must match draft_year")
+    def validate_board(self) -> "BoardSnapshot":
+        """Reject duplicate identities and partial/gapped rank ranges."""
         ranks = [row.overall_rank for row in self.prospects]
         if sorted(ranks) != list(range(1, len(ranks) + 1)):
             raise ValueError("Ranks must be unique and consecutive starting at 1")
         if len({row.key for row in self.prospects}) != len(self.prospects):
             raise ValueError("Duplicate source identities in snapshot")
         for row in self.prospects:
-            if row.position not in POSITION_MAP:
-                raise ValueError(f"Unknown PFF position {row.position!r}; add a reviewed mapping")
+            if row.position not in self.position_map:
+                raise ValueError(f"Unknown prospect position {row.position!r}; add a reviewed mapping")
             canonical_school(row.school)
         return self
 
@@ -126,3 +126,18 @@ class PFFBoardSnapshot(BaseModel):
         payload["prospects"] = sorted(payload["prospects"], key=lambda row: row["overall_rank"])
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
         return hashlib.sha256(encoded.encode()).hexdigest()
+
+
+class PFFBoardSnapshot(BoardSnapshot):
+    """PFF-specific provenance validation layered on the shared board contract."""
+
+    source: str = SOURCE_NAME
+
+    @model_validator(mode="after")
+    def validate_pff_source(self) -> "PFFBoardSnapshot":
+        parsed = urlparse(self.source_url)
+        if self.source != SOURCE_NAME or parsed.scheme != "https" or parsed.netloc != "www.pff.com":
+            raise ValueError("Expected an HTTPS www.pff.com Big Board source")
+        if parsed.path != "/draft/big-board" or parse_qs(parsed.query).get("season") != [str(self.draft_year)]:
+            raise ValueError("Source URL season must match draft_year")
+        return self

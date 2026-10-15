@@ -41,6 +41,64 @@ case-insensitive; equivalent aliases of the same team are not trades.
 Leadership rows accept those same team tokens, a `role` of `gm` or `head_coach`,
 a `person_id`, and a `start_year`.
 
+## Consensus prospect CSV imports
+
+The local consensus file is kept in `data/prospects/` (Git-ignored). Imports
+expect exactly `Rank,Player Name,Position,College` headers, with complete rows,
+unique consecutive ranks starting at 1, and unique name/school identities.
+Only use data you are authorized to store and display.
+
+Initialize the configured database and reference data first if needed using
+`python -m app.db.initialize` from `backend`. This step writes reference data;
+it is not part of the read-only preview. Review `DATABASE_URL` before running
+database commands.
+
+Preview the top 150 from PowerShell at the repository root:
+
+```powershell
+Set-Location backend
+..\.venv\Scripts\python.exe -m app.jobs.import_consensus_csv --csv ..\data\prospects\consensus-big-board-2027-20261015.csv --draft-year 2027 --snapshot-date 2026-10-15 --limit 150
+```
+
+Review the JSON report, then run the same command with `--commit` to persist:
+
+```powershell
+..\.venv\Scripts\python.exe -m app.jobs.import_consensus_csv --csv ..\data\prospects\consensus-big-board-2027-20261015.csv --draft-year 2027 --snapshot-date 2026-10-15 --limit 150 --commit
+```
+
+Use the date of each new source export as `--snapshot-date`. Without `--limit`,
+all rows are selected. Every row's structure, rank, and identity is validated
+even with a limit; school/position mapping is required only for selected rows.
+Unmapped schools or positions stop the import for reviewed mappings rather than
+creating placeholder colleges. `DL` maps to `DT`; the original `DL` is retained.
+
+### Protecting existing boards and drafts
+
+- Existing UMM player IDs are reused through persistent source mappings or
+  unambiguous exact normalized name/school matches, including across sources.
+  Rank is never an identity key.
+- Source ranks are saved in dated snapshots, not written into custom-board
+  ranks, engine scores, or athletic grades. Repeat imports of an identical
+  dated snapshot are idempotent.
+- Existing profiles and eligibility are preserved. New players are
+  `unconfirmed`; importing projected prospects does not make them eligible for
+  simulation. Displaying/using a projected player pool is a separate workflow.
+- No existing players, custom-board entries, inactive flags, board versions,
+  or saved draft picks are deleted or reordered. New prospects are not
+  automatically inserted into users' custom boards.
+- `missing_from_previous_snapshot` lists players omitted relative to the most
+  recent dated snapshot for this source and draft year. They remain intact for
+  review. Reducing `--limit` can also produce these notices; absence is not
+  treated as loss of eligibility.
+- Ambiguous names, transfers, conflicting identities, and draft-year changes
+  stop for review. `--identity-map path\to\reviewed.json` accepts a JSON object
+  mapping source keys to **existing** UMM player IDs. Derive CSV keys using
+  `source_key(name, school)` in `app.services.pff_snapshot`. Overrides cannot
+  silently reassign existing mappings or bypass draft-year conflicts.
+- The complete selected snapshot is validated before writes, and snapshot
+  writes are atomic. The importer does not initialize the database, seed data,
+  regenerate boards, or collect data from the network.
+
 ## Permissioned 2027 PFF prospect boards
 
 Only collect and import PFF data when your permission covers automated retrieval,
