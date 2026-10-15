@@ -301,6 +301,48 @@ def test_prediction_endpoint_requires_configured_llm(isolate_draft_store: Sessio
     assert response.status_code == 503
 
 
+@pytest.mark.parametrize("candidate_id", ["player-1", "missing-player", "wrong-year", "unconfirmed"])
+def test_prediction_endpoint_rejects_candidates_outside_available_draft_pool(
+    isolate_draft_store: Session, monkeypatch, candidate_id: str,
+) -> None:
+    """Only eligible, unselected players from this draft year may be prediction candidates."""
+    repository = DraftRepository(isolate_draft_store)
+    draft = repository.create("user-1", "team-2", 2026)
+    repository.add_pick(draft, "team-1", "player-1", "USER")
+    if candidate_id in {"wrong-year", "unconfirmed"}:
+        isolate_draft_store.add(
+            PlayerRecord(
+                id=candidate_id,
+                first_name="Test",
+                last_name="Candidate",
+                position="QB",
+                college_id="alabama",
+                draft_year=2027 if candidate_id == "wrong-year" else 2026,
+                eligibility_status="unconfirmed" if candidate_id == "unconfirmed" else "eligible",
+            )
+        )
+    isolate_draft_store.commit()
+
+    class UnexpectedProvider:
+        def __init__(self):
+            pytest.fail("The prediction provider must not be called for an invalid candidate")
+
+    monkeypatch.setattr("app.api.drafts.OpenAICompatiblePredictionProvider", UnexpectedProvider)
+    client = TestClient(app)
+    response = client.post(
+        f"/api/drafts/{draft.id}/prediction",
+        json={
+            "team_id": "team-2",
+            "pick_number": 2,
+            "candidates": [{"player_id": candidate_id}],
+        },
+        headers={"Authorization": "Bearer " + create_access_token("user-1")},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Prediction candidates must be eligible and not already selected for this draft"
+
+
 def test_auto_simulation_uses_llm_and_persists_provenance(isolate_draft_store: Session) -> None:
     """Configured model predictions should drive and explain automatic picks."""
     class FakeProvider:
