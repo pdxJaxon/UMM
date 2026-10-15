@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.db.models import HistoricalDraftTradeRecord, TeamDraftingTendencyRecord, TeamLeadershipRecord, TeamRecord
@@ -172,6 +172,11 @@ class DraftTradeHistoryIngestionService:
                 counts[(event.moving_up_team_id, "gm", event.general_manager_id)]["trade_up"] += 1
             if event.head_coach_id:
                 counts[(event.moving_up_team_id, "head_coach", event.head_coach_id)]["trade_up"] += 1
+        self.session.execute(
+            delete(TeamDraftingTendencyRecord).where(
+                TeamDraftingTendencyRecord.source_name == "historical-trade-analysis"
+            )
+        )
         for (team_id, actor_type, actor_id), directions in counts.items():
             total = directions["trade_up"] + directions["trade_down"]
             for tendency_type, count in directions.items():
