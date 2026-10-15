@@ -14,7 +14,7 @@ from app.db.models import (
     ProspectSourceIdentityRecord,
 )
 from app.services.pff_snapshot import (
-    BoardSnapshot, ProspectRow, canonical_school, normalized_name,
+    PFFBoardSnapshot, PFFProspectRow, POSITION_MAP, SOURCE_NAME, canonical_school, normalized_name,
 )
 
 
@@ -22,7 +22,7 @@ from app.services.pff_snapshot import (
 class ResolvedProspect:
     """An identity decision that can be reviewed before any writes."""
 
-    row: ProspectRow
+    row: PFFProspectRow
     player_id: str
     college_id: str
     canonical_position: str
@@ -30,7 +30,7 @@ class ResolvedProspect:
 
 
 def resolve_identities(
-    session: Session, snapshot: BoardSnapshot, overrides: dict[str, str] | None = None,
+    session: Session, snapshot: PFFBoardSnapshot, overrides: dict[str, str] | None = None,
 ) -> list[ResolvedProspect]:
     """Match persistent keys or unambiguous exact names/schools, never fuzzy names."""
     overrides = overrides or {}
@@ -45,7 +45,7 @@ def resolve_identities(
     aliases = {
         identity.source_key: identity
         for identity in session.scalars(
-            select(ProspectSourceIdentityRecord).where(ProspectSourceIdentityRecord.source_name == snapshot.source)
+            select(ProspectSourceIdentityRecord).where(ProspectSourceIdentityRecord.source_name == SOURCE_NAME)
         )
     }
     snapshot_names: dict[str, int] = {}
@@ -75,14 +75,14 @@ def resolve_identities(
             if player is not None and player.college_id != college_id:
                 raise ValueError(f"School changed for {row.name}; review transfer/identity and provide an override")
             player_id = player.id if player is not None else (
-                "prospect-" + uuid5(NAMESPACE_URL, f"umm:{snapshot.source}:{row.key}").hex
+                "prospect-" + uuid5(NAMESPACE_URL, f"umm:{SOURCE_NAME}:{row.key}").hex
             )
             if player is None and player_id in by_id:
                 raise ValueError(f"Generated player ID already exists for {row.name}; review identity")
         if player is not None and player.draft_year != snapshot.draft_year:
             raise ValueError(f"Draft-year conflict for {row.name}; review eligibility before reusing this identity")
         resolved.append(ResolvedProspect(
-            row, player_id, college_id, snapshot.position_map[row.position], player is None,
+            row, player_id, college_id, POSITION_MAP[row.position], player is None,
         ))
     if len({entry.player_id for entry in resolved}) != len(resolved):
         raise ValueError("Multiple source rows resolve to the same UMM player")
@@ -91,7 +91,7 @@ def resolve_identities(
 
 def import_board_snapshot(
     session: Session,
-    snapshot: BoardSnapshot,
+    snapshot: PFFBoardSnapshot,
     overrides: dict[str, str] | None = None,
     commit: bool = False,
 ) -> dict[str, object]:
@@ -103,20 +103,6 @@ def import_board_snapshot(
     if existing is not None:
         return {"status": "already_imported", "snapshot_id": existing.id, "prospect_count": existing.prospect_count}
     entries = resolve_identities(session, snapshot, overrides)
-    previous = session.scalar(
-        select(ProspectBoardSnapshotRecord).where(
-            ProspectBoardSnapshotRecord.source_name == snapshot.source,
-            ProspectBoardSnapshotRecord.draft_year == snapshot.draft_year,
-        ).order_by(ProspectBoardSnapshotRecord.collected_at.desc(), ProspectBoardSnapshotRecord.id).limit(1)
-    )
-    current_ids = {entry.player_id for entry in entries}
-    missing = [] if previous is None else [
-        {"player_id": row.player_id, "name": row.source_name_display, "previous_rank": row.overall_rank}
-        for row in session.scalars(select(ProspectBoardRankingRecord).where(
-            ProspectBoardRankingRecord.snapshot_id == previous.id,
-        ).order_by(ProspectBoardRankingRecord.overall_rank))
-        if row.player_id not in current_ids
-    ]
     report: dict[str, object] = {
         "status": "imported" if commit else "dry_run",
         "prospect_count": len(entries),
@@ -124,9 +110,6 @@ def import_board_snapshot(
         "existing_players": sum(not entry.is_new_player for entry in entries),
         "missing_grades": sum(entry.row.pff_grade is None for entry in entries),
         "new_player_eligibility": "unconfirmed",
-        "missing_from_previous_snapshot": missing,
-        "existing_profiles_preserved": True,
-        "custom_boards_preserved": True,
         "identities": [
             {"source_key": entry.row.key, "name": entry.row.name, "player_id": entry.player_id,
              "college_id": entry.college_id, "position": entry.canonical_position,
@@ -139,7 +122,7 @@ def import_board_snapshot(
     snapshot_id = "board-snapshot-" + uuid4().hex
     with session.begin_nested():
         session.add(ProspectBoardSnapshotRecord(
-            id=snapshot_id, content_hash=fingerprint, source_name=snapshot.source,
+            id=snapshot_id, content_hash=fingerprint, source_name=SOURCE_NAME,
             source_url=snapshot.source_url, draft_year=snapshot.draft_year,
             collected_at=snapshot.collected_at.astimezone(UTC).replace(tzinfo=None),
             source_updated_at_display=snapshot.source_updated_at_display,
@@ -157,12 +140,12 @@ def import_board_snapshot(
         session.flush()
         for entry in entries:
             alias = session.scalar(select(ProspectSourceIdentityRecord).where(
-                ProspectSourceIdentityRecord.source_name == snapshot.source,
+                ProspectSourceIdentityRecord.source_name == SOURCE_NAME,
                 ProspectSourceIdentityRecord.source_key == entry.row.key,
             ))
             if alias is None:
                 session.add(ProspectSourceIdentityRecord(
-                    source_name=snapshot.source, source_key=entry.row.key,
+                    source_name=SOURCE_NAME, source_key=entry.row.key,
                     player_id=entry.player_id, source_record_id=entry.row.source_record_id,
                 ))
             session.add(ProspectBoardRankingRecord(
