@@ -96,6 +96,10 @@ class LeadershipIngestionService:
                     TeamLeadershipRecord.start_year == start_year,
                 )
             )
+            if existing is not None and end_year is not None:
+                existing.end_year = end_year
+                existing.observed_at = timestamp
+                existing.raw_payload = row
             if existing is None:
                 self.session.add(TeamLeadershipRecord(
                     team_id=team_id,
