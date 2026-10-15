@@ -54,12 +54,6 @@ def canonical_school(value: str) -> str:
 
 
 class ProspectRow(BaseModel):
-    """Factual identity and ranking fields from an external prospect board."""
-        raise ValueError(f"Unknown PFF school {value!r}; add a reviewed school mapping")
-    return school_id
-
-
-class PFFProspectRow(BaseModel):
     """Factual row fields exposed by the rendered PFF board."""
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, allow_inf_nan=False, frozen=True)
