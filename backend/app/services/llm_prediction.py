@@ -82,7 +82,7 @@ class OpenAICompatiblePredictionProvider:
                 headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
                 json={
                     "model": self.model_name,
-                    "temperature": _temperature_from_randomness(randomness),
+                    **({"temperature": _temperature_from_randomness(randomness)} if self.model_name != "gpt-5" else {}),
                     "response_format": {"type": "json_object"},
                     "messages": [
                         {"role": "system", "content": "Return only the requested JSON object."},
