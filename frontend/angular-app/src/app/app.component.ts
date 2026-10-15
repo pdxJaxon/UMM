@@ -163,6 +163,7 @@ export class AppComponent implements OnInit {
 
   private readonly apiBase = 'http://localhost:8000';
   private accessToken = '';
+  private authSession = 0;
   private boardId: number | null = null;
   private readonly draftYear = 2027;
 
@@ -453,6 +454,7 @@ export class AppComponent implements OnInit {
   }
 
   protected logout(): void {
+    this.authSession += 1;
     this.accessToken = '';
     this.favoriteTeamMessage = null;
     this.favoriteTeamId = '';
@@ -461,6 +463,7 @@ this.selectedTeamId = '';
 this.overallRandomness = 50;
 this.teamRandomnessOverrides = {};
 this.draftRunMessage = null;
+    this.startingDraft = false;
   this.draftState = null;
     this.draftEntries = [];
     this.draftId = null;
@@ -532,6 +535,7 @@ this.activeEntry = null;
     this.draftEntries = [];
     const boardEntries = [...this.entries];
     const overrides = { ...this.teamRandomnessOverrides };
+    const authSession = this.authSession;
     this.http.post<StartDraftResponse>(
       `${this.apiBase}/api/drafts`,
       {
@@ -543,6 +547,7 @@ this.activeEntry = null;
       this.requestOptions(true)
     ).subscribe({
       next: (response) => {
+        if (authSession !== this.authSession) return;
         this.startingDraft = false;
         this.draftId = response.draft_run_id;
         this.draftEntries = this.mapDraftEntries(response.eligible_players, boardEntries);
@@ -550,6 +555,7 @@ this.activeEntry = null;
         this.advanceDraft(response.draft_run_id);
       },
       error: (error: HttpErrorResponse) => {
+        if (authSession !== this.authSession) return;
         this.startingDraft = false;
         this.draftId = null;
         this.draftRunMessage = this.describeApiError(error, 'Unable to start the mock draft.');
@@ -563,16 +569,19 @@ this.activeEntry = null;
 
     this.draftBusy = true;
     this.draftError = null;
+    const authSession = this.authSession;
     this.http.post<DraftStateResponse>(
       `${this.apiBase}/api/drafts/${state.draft_run.id}/picks`,
       { team_id: state.draft_run.controlled_team_id, player_id: this.draftSelectedPlayerId },
       this.requestOptions(true)
     ).subscribe({
       next: (updatedState) => {
+        if (authSession !== this.authSession) return;
         this.setDraftState(updatedState);
         this.advanceDraft(updatedState.draft_run.id);
       },
       error: (error: HttpErrorResponse) => {
+        if (authSession !== this.authSession) return;
         this.draftBusy = false;
         this.draftError = this.describeApiError(error, 'Unable to submit your pick.');
       }
@@ -602,16 +611,19 @@ this.activeEntry = null;
   private advanceDraft(draftId: string): void {
     this.draftBusy = true;
     this.draftError = null;
+    const authSession = this.authSession;
     this.http.post<DraftStateResponse>(
       `${this.apiBase}/api/drafts/${draftId}/auto-simulate`,
       {},
       this.requestOptions(true)
     ).subscribe({
       next: (state) => {
+        if (authSession !== this.authSession) return;
         this.setDraftState(state);
         this.draftBusy = false;
       },
       error: (error: HttpErrorResponse) => {
+        if (authSession !== this.authSession) return;
         this.draftBusy = false;
         this.draftError = this.describeApiError(error, 'Unable to advance the draft.');
       }
