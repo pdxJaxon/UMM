@@ -89,6 +89,12 @@ def test_refresh_removes_obsolete_actor_tendencies_without_touching_other_source
                 observed_at=datetime(2026, 1, 1, tzinfo=UTC),
             ),
             TeamDraftingTendencyRecord(
+                team_id="team-1", draft_year=None, actor_type="head_coach", actor_id="coach-a",
+                tendency_type="trade_down", preference_score=100, confidence_score=20,
+                sample_size=1, source_name="historical-trade-analysis",
+                observed_at=datetime(2026, 1, 1, tzinfo=UTC),
+            ),
+            TeamDraftingTendencyRecord(
                 team_id="team-1", draft_year=None, actor_type="gm", actor_id="gm-a",
                 tendency_type="trade_down", preference_score=100, confidence_score=20,
                 sample_size=1, source_name="manual",
@@ -106,8 +112,15 @@ def test_refresh_removes_obsolete_actor_tendencies_without_touching_other_source
             source_name="historical-trade-analysis", team_id="team-1", actor_id="gm-a"
         ).count() == 0
         assert session.query(TeamDraftingTendencyRecord).filter_by(
+            source_name="historical-trade-analysis", team_id="team-1", actor_id="coach-a"
+        ).count() == 0
+        assert session.query(TeamDraftingTendencyRecord).filter_by(
             source_name="historical-trade-analysis", team_id="team-2",
             actor_type="gm", actor_id="gm-a", tendency_type="trade_up", sample_size=1,
+        ).count() == 1
+        assert session.query(TeamDraftingTendencyRecord).filter_by(
+            source_name="historical-trade-analysis", team_id="team-2",
+            actor_type="head_coach", actor_id="coach-a", tendency_type="trade_up", sample_size=1,
         ).count() == 1
         assert session.query(TeamDraftingTendencyRecord).filter_by(source_name="manual").count() == 1
 
