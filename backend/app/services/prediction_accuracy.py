@@ -66,6 +66,7 @@ def evaluate_prediction_accuracy(
         "exact_pick_rate": round(exact_hits / evaluated_picks * 100, 2) if evaluated_picks else 0.0,
         "player_hit_rate": round(player_hits / evaluated_picks * 100, 2) if evaluated_picks else 0.0,
         "selection_error_rate": round((wrong_player_picks + missing_predictions) / evaluated_picks * 100, 2) if evaluated_picks else 0.0,
+        "total_absolute_pick_error": sum(pick_errors),
         "mean_absolute_pick_error": round(sum(pick_errors) / len(pick_errors), 2) if pick_errors else None,
     }
 

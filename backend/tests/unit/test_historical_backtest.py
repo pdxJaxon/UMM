@@ -97,6 +97,75 @@ def test_backtest_can_report_unmatched_actuals_without_scoring_them() -> None:
     assert result.aggregate["evaluated_picks"] == 1
 
 
+def test_backtest_aggregates_error_by_matched_player_count() -> None:
+    """One team's lone match must not outweigh another team's three matches."""
+    dataset = HistoricalDraftDataset(
+        draft_year=2024,
+        as_of=date(2024, 3, 1),
+        team_needs={},
+        prospects=tuple({"player_id": player_id} for player_id in ("a", "b", "c", "d", "e")),
+        team_staff={},
+        actual_picks={
+            "team-1": ({"pick_number": 1, "player_id": "a"},),
+            "team-2": (
+                {"pick_number": 2, "player_id": "b"},
+                {"pick_number": 3, "player_id": "c"},
+                {"pick_number": 4, "player_id": "d"},
+                {"pick_number": 5, "player_id": "e"},
+            ),
+        },
+    )
+    predictions = {
+        "team-1": ({"pick_number": 13, "player_id": "a"},),
+        "team-2": (
+            {"pick_number": 2, "player_id": "b"},
+            {"pick_number": 3, "player_id": "c"},
+            {"pick_number": 4, "player_id": "d"},
+        ),
+    }
+
+    result = run_historical_backtest([dataset], lambda _year, team_id, _dataset: predictions[team_id])
+
+    assert result.aggregate["player_hits"] == 4
+    assert result.aggregate["mean_absolute_pick_error"] == 3.0
+
+
+def test_backtest_without_matched_players_has_no_aggregate_pick_error() -> None:
+    """A missing prediction is not evidence of zero pick-number error."""
+    result = run_historical_backtest([_dataset()], lambda *_: [])
+
+    assert result.aggregate["player_hits"] == 0
+    assert result.aggregate["mean_absolute_pick_error"] is None
+
+
+def test_unmatched_early_outcome_does_not_consume_a_replay_candidate() -> None:
+    """Unscored unknown outcomes must not change the predictions for later picks."""
+    dataset = HistoricalDraftDataset(
+        draft_year=2024,
+        as_of=date(2024, 3, 1),
+        team_needs={},
+        prospects=({"player_id": "player-a"}, {"player_id": "player-b"}),
+        team_staff={},
+        actual_picks={
+            "team-1": ({"pick_number": 1, "player_id": "missing"},),
+            "team-2": ({"pick_number": 2, "player_id": "player-a"},),
+        },
+    )
+
+    replay = build_deterministic_replay(dataset)
+
+    assert replay["team-1"] == ()
+    assert replay["team-2"] == ({"pick_number": 2, "player_id": "player-a"},)
+    result = run_historical_backtest(
+        [dataset], deterministic_replay_predictor(dataset), allow_unmatched_actuals=True,
+    )
+    assert result.aggregate["unmatched_actuals"] == 1
+    assert result.aggregate["evaluated_picks"] == 1
+    assert result.aggregate["exact_pick_rate"] == 100.0
+    report = run_pilot([2024], type("Provider", (), {"load": lambda _self, _years: [dataset]})())
+    assert report["aggregate"]["exact_pick_rate"] == 100.0
+
+
 def test_file_provider_loads_and_filters_normalized_snapshots(tmp_path) -> None:
     """A normalized JSON file should feed the same immutable replay contract."""
     path = tmp_path / "historical-datasets.json"

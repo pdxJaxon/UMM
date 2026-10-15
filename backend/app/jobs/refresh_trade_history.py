@@ -33,11 +33,11 @@ def main() -> int:
     try:
         seed_reference_data(session)
         seasons = list(range(args.start_season, args.end_season + 1))
-        provider = (
-            FileDraftTradeHistoryProvider(args.trade_history_file)
-            if args.trade_history_file
-            else NflverseDraftTradeHistoryProvider(NflverseProvider())
-        )
+        if args.trade_history_file:
+            file_provider = FileDraftTradeHistoryProvider(args.trade_history_file)
+            provider = NflverseDraftTradeHistoryProvider(file_provider, source_name=file_provider.source_name)
+        else:
+            provider = NflverseDraftTradeHistoryProvider(NflverseProvider())
         processed = DraftTradeHistoryIngestionService(session, provider).refresh(seasons)
         leadership_processed = 0
         if args.leadership_file:

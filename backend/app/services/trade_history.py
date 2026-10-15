@@ -37,7 +37,7 @@ class NflverseDraftTradeHistoryProvider:
             pick_number = _integer(row, "pick_number", "pick", "overall_pick")
             original_team = _team_value(row, "original_team_id", "original_team", "original_team_abbr", "from_team")
             selecting_team = _team_value(row, "team_id", "team", "team_abbr", "selecting_team", "to_team")
-            if not draft_year or not pick_number or not original_team or not selecting_team or original_team == selecting_team:
+            if not draft_year or not pick_number or not original_team or not selecting_team or original_team.casefold() == selecting_team.casefold():
                 continue
             trade = {
                 "draft_year": draft_year,
@@ -77,14 +77,10 @@ class LeadershipIngestionService:
     def refresh(self, records: list[dict[str, Any]], observed_at: datetime | None = None) -> int:
         """Persist valid leadership periods and return the number of new rows."""
         timestamp = observed_at or datetime.now(UTC)
-        teams = {
-            value: team.id
-            for team in self.session.scalars(select(TeamRecord)).all()
-            for value in (team.id, team.abbreviation.upper())
-        }
+        teams = _team_lookup(self.session)
         processed = 0
         for row in records:
-            team_id = teams.get(str(row.get("team_id") or row.get("team") or row.get("team_abbr") or "").upper())
+            team_id = teams.get(str(row.get("team_id") or row.get("team") or row.get("team_abbr") or "").strip().upper())
             role_type = _role_type(row.get("role_type") or row.get("role"))
             person_id = str(row.get("person_id") or row.get("id") or "").strip()
             person_name = str(row.get("person_name") or row.get("name") or person_id).strip()
@@ -128,15 +124,12 @@ class DraftTradeHistoryIngestionService:
     def refresh(self, seasons: list[int], observed_at: datetime | None = None) -> int:
         """Upsert events and replace aggregate trade-direction tendencies."""
         timestamp = observed_at or datetime.now(UTC)
-        teams = {
-            team.abbreviation.upper(): team.id
-            for team in self.session.scalars(select(TeamRecord)).all()
-        }
+        teams = _team_lookup(self.session)
         events = 0
         for payload in self.provider.fetch(seasons):
-            moving_up_team_id = teams.get(str(payload["moving_up_team"]).upper(), str(payload["moving_up_team"]))
-            moving_down_team_id = teams.get(str(payload["moving_down_team"]).upper(), str(payload["moving_down_team"]))
-            if self.session.get(TeamRecord, moving_up_team_id) is None or self.session.get(TeamRecord, moving_down_team_id) is None:
+            moving_up_team_id = teams.get(str(payload["moving_up_team"]).strip().upper())
+            moving_down_team_id = teams.get(str(payload["moving_down_team"]).strip().upper())
+            if not moving_up_team_id or not moving_down_team_id or moving_up_team_id == moving_down_team_id:
                 continue
             existing = self.session.scalar(
                 select(HistoricalDraftTradeRecord).where(
@@ -215,6 +208,15 @@ class DraftTradeHistoryIngestionService:
                     tendency.sample_size = count
                     tendency.observed_at = observed_at
                     tendency.raw_payload = {"trade_up_count": directions["trade_up"], "trade_down_count": directions["trade_down"]}
+
+
+def _team_lookup(session: Session) -> dict[str, str]:
+    """Resolve canonical team IDs and abbreviations with the same normalization."""
+    return {
+        value.strip().upper(): team.id
+        for team in session.scalars(select(TeamRecord)).all()
+        for value in (team.id, team.abbreviation)
+    }
 
 
 def _rows(value: Any) -> list[dict[str, Any]]:

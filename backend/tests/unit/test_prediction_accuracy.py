@@ -35,6 +35,7 @@ def test_evaluation_reports_exact_hits_player_hits_and_pick_error() -> None:
         "exact_pick_rate": 33.33,
         "player_hit_rate": 66.67,
         "selection_error_rate": 66.67,
+        "total_absolute_pick_error": 1,
         "mean_absolute_pick_error": 0.5,
     }
 
@@ -47,6 +48,7 @@ def test_empty_evaluation_has_zero_rates_and_no_error() -> None:
     assert result["exact_pick_rate"] == 0.0
     assert result["player_hit_rate"] == 0.0
     assert result["selection_error_rate"] == 0.0
+    assert result["total_absolute_pick_error"] == 0
     assert result["mean_absolute_pick_error"] is None
 
 

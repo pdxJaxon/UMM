@@ -14,6 +14,33 @@ Run the 2024 offline pilot from `backend`:
 python -m app.jobs.run_historical_backtest --start-season 2024 --end-season 2024 --draft-picks-file ..\data\draft_picks.parquet --combine-file ..\data\combine.parquet --players-file ..\data\players.parquet
 ```
 
+The pilot reports outcomes missing from the prospect snapshot as
+`unmatched_actuals`. These outcomes are excluded from scoring and deterministic
+replay: they do not consume a candidate or renumber later picks. This is a
+partial-coverage evaluation, not a simulation of the full draft.
+
+Aggregate `mean_absolute_pick_error` divides the total absolute pick error by
+the total number of matched players across all teams and seasons. Per-team
+scorecards include `total_absolute_pick_error` so aggregation does not average
+rounded team means. If no players match, the mean is `null`, not zero.
+
+## Historical trade and leadership imports
+
+From `backend`, import a JSON or CSV ownership history and optional leadership
+file:
+
+```powershell
+python -m app.jobs.refresh_trade_history --start-season 2023 --end-season 2024 --trade-history-file path\to\trades.json --leadership-file path\to\leadership.json
+```
+
+Trade rows require a season (`season` or `draft_year`), a pick number (`pick` or
+`pick_number`), and explicit original and selecting teams (`original_team` and
+`team`, or `original_team_id` and `team_id`). File imports retain a
+`file:<filename>` source label. Team abbreviations and canonical IDs are
+case-insensitive; equivalent aliases of the same team are not trades.
+Leadership rows accept those same team tokens, a `role` of `gm` or `head_coach`,
+a `person_id`, and a `start_year`.
+
 ## Permissioned 2027 PFF prospect boards
 
 Only collect and import PFF data when your permission covers automated retrieval,

@@ -44,15 +44,18 @@ def build_deterministic_replay(
     dataset: HistoricalDraftDataset,
     weights: DraftScoreWeights | None = None,
 ) -> dict[str, tuple[dict[str, object], ...]]:
-    """Replay historical pick order using only the supplied pre-draft snapshot."""
+    """Replay covered historical picks without inventing selections for unknowns."""
     candidates = [dict(prospect) for prospect in dataset.prospects]
+    prospect_ids = {str(prospect.get("player_id") or prospect.get("id")) for prospect in candidates}
     selected: set[str] = set()
     predictions: dict[str, list[dict[str, object]]] = {team_id: [] for team_id in dataset.actual_picks}
     events = sorted(
         ((int(pick["pick_number"]), team_id, pick) for team_id, picks in dataset.actual_picks.items() for pick in picks),
         key=lambda event: event[0],
     )
-    for pick_number, team_id, _actual_pick in events:
+    for pick_number, team_id, actual_pick in events:
+        if str(actual_pick["player_id"]) not in prospect_ids:
+            continue
         ranked = _rank_available_candidates(dataset, team_id, pick_number, candidates, selected, weights)
         if not ranked:
             continue
@@ -223,11 +226,7 @@ def _aggregate(results: list[dict[str, object]]) -> dict[str, object]:
     exact_hits = sum(int(result["exact_hits"]) for result in results)
     player_hits = sum(int(result["player_hits"]) for result in results)
     unmatched_actuals = sum(int(result["unmatched_actuals"]) for result in results)
-    errors = [
-        float(result["mean_absolute_pick_error"])
-        for result in results
-        if result["mean_absolute_pick_error"] is not None
-    ]
+    total_absolute_pick_error = sum(int(result["total_absolute_pick_error"]) for result in results)
     return {
         "evaluated_teams": len(results),
         "evaluated_picks": evaluated_picks,
@@ -236,7 +235,7 @@ def _aggregate(results: list[dict[str, object]]) -> dict[str, object]:
         "unmatched_actuals": unmatched_actuals,
         "exact_pick_rate": round(exact_hits / evaluated_picks * 100, 2) if evaluated_picks else 0.0,
         "player_hit_rate": round(player_hits / evaluated_picks * 100, 2) if evaluated_picks else 0.0,
-        "mean_absolute_pick_error": round(sum(errors) / len(errors), 2) if errors else None,
+        "mean_absolute_pick_error": round(total_absolute_pick_error / player_hits, 2) if player_hits else None,
     }
 
 
