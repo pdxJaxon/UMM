@@ -75,6 +75,20 @@ interface TeamBoardResponse {
   entries: TeamBoardEntryPayload[];
 }
 
+interface DraftPlayerPayload {
+  player_id: string;
+  first_name: string;
+  last_name: string;
+  position: string;
+  college_name: string | null;
+  college_abbreviation: string | null;
+}
+
+interface StartDraftResponse {
+  draft_run_id: string;
+  eligible_players: DraftPlayerPayload[];
+}
+
 interface DraftStateResponse {
   draft_run: {
     id: string;
@@ -141,6 +155,7 @@ export class AppComponent implements OnInit {
   protected draftRunMessage: string | null = null;
   protected startingDraft = false;
   protected draftState: DraftStateResponse | null = null;
+  protected draftEntries: BoardEntry[] = [];
   protected draftId: string | null = null;
   protected draftError: string | null = null;
   protected draftBusy = false;
@@ -199,7 +214,7 @@ export class AppComponent implements OnInit {
 
   protected get draftCandidates(): BoardEntry[] {
     const selectedPlayers = new Set(this.draftState?.picks.map((pick) => pick.player_id) ?? []);
-    return this.entries.filter((entry) => !selectedPlayers.has(entry.player_id));
+    return this.draftEntries.filter((entry) => !selectedPlayers.has(entry.player_id));
   }
 
   protected get draftOnControlledTeam(): boolean {
@@ -447,7 +462,8 @@ this.overallRandomness = 50;
 this.teamRandomnessOverrides = {};
 this.draftRunMessage = null;
   this.draftState = null;
-  this.draftId = null;
+    this.draftEntries = [];
+    this.draftId = null;
   this.draftError = null;
   this.draftBusy = false;
   this.draftSelectedPlayerId = '';
@@ -513,8 +529,10 @@ this.activeEntry = null;
     this.startingDraft = true;
     this.draftRunMessage = null;
     this.draftError = null;
+    this.draftEntries = [];
+    const boardEntries = [...this.entries];
     const overrides = { ...this.teamRandomnessOverrides };
-    this.http.post<{ draft_run_id: string }>(
+    this.http.post<StartDraftResponse>(
       `${this.apiBase}/api/drafts`,
       {
         controlled_team_id: this.selectedTeamId,
@@ -527,6 +545,7 @@ this.activeEntry = null;
       next: (response) => {
         this.startingDraft = false;
         this.draftId = response.draft_run_id;
+        this.draftEntries = this.mapDraftEntries(response.eligible_players, boardEntries);
         this.draftRunMessage = `Mock draft ${response.draft_run_id} started.`;
         this.advanceDraft(response.draft_run_id);
       },
@@ -569,6 +588,7 @@ this.activeEntry = null;
   protected closeDraft(): void {
     if (this.draftState?.draft_run.status !== 'completed') return;
     this.draftState = null;
+    this.draftEntries = [];
     this.draftId = null;
     this.draftError = null;
     this.draftSelectedPlayerId = '';
@@ -576,7 +596,7 @@ this.activeEntry = null;
   }
 
   protected draftPlayerName(playerId: string): string {
-    return this.entries.find((entry) => entry.player_id === playerId)?.name ?? playerId;
+    return this.draftEntries.find((entry) => entry.player_id === playerId)?.name ?? playerId;
   }
 
   private advanceDraft(draftId: string): void {
@@ -601,7 +621,7 @@ this.activeEntry = null;
   private setDraftState(state: DraftStateResponse): void {
     this.draftState = state;
     this.draftId = state.draft_run.id;
-    const available = this.entries.filter((entry) => !state.picks.some((pick) => pick.player_id === entry.player_id));
+    const available = this.draftEntries.filter((entry) => !state.picks.some((pick) => pick.player_id === entry.player_id));
     if (!available.some((entry) => entry.player_id === this.draftSelectedPlayerId)) {
       this.draftSelectedPlayerId = available[0]?.player_id ?? '';
     }
@@ -685,6 +705,28 @@ this.activeEntry = null;
         source: this.boardMode === 'personal' ? 'My board' : 'Default board'
       };
     });
+  }
+
+  private mapDraftEntries(players: DraftPlayerPayload[], boardEntries: BoardEntry[]): BoardEntry[] {
+    const playersById = new Map(players.map((player) => [player.player_id, player]));
+    const preferredEntries = boardEntries
+      .filter((entry) => playersById.has(entry.player_id))
+      .map((entry, index) => ({ ...entry, rank: index + 1, source: 'Draft board' }));
+    const preferredIds = new Set(preferredEntries.map((entry) => entry.player_id));
+    const additionalEntries = players
+      .filter((player) => !preferredIds.has(player.player_id))
+      .map((player, index) => ({
+        rank: preferredEntries.length + index + 1,
+        player_id: player.player_id,
+        name: [player.first_name, player.last_name].filter(Boolean).join(' ') || 'Unknown prospect',
+        position: player.position || 'N/A',
+        school: player.college_name ?? player.college_abbreviation ?? 'N/A',
+        score: 0,
+        need: 0,
+        fit: 0,
+        source: 'Draft pool'
+      }));
+    return [...preferredEntries, ...additionalEntries];
   }
 
   private describeApiError(error: HttpErrorResponse, fallback: string): string {

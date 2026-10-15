@@ -64,6 +64,7 @@ def start_draft(
         "draft_run_id": draft.id,
         "status": draft.status,
         "controlled_team_id": draft.controlled_team_id,
+        "eligible_players": repository.eligible_players(draft),
     }
 
 

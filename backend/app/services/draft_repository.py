@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import DraftPickRecord, DraftRunRecord, DraftTradeRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, TeamNeedRecord
+from app.db.models import CollegeRecord, DraftPickRecord, DraftRunRecord, DraftTradeRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, TeamNeedRecord
 from app.services.llm_prediction import OpenAICompatiblePredictionProvider, PredictionContext, PredictionProvider, predict_pick
 from app.services.leadership_tendencies import get_effective_tendencies
 from app.services.ranking_service import select_with_team_randomness
@@ -200,6 +200,29 @@ class DraftRepository:
                 for trade in self._ordered_trades(draft.id)
             ],
         }
+
+    def eligible_players(self, draft: DraftRunRecord) -> list[dict[str, object]]:
+        """Return all eligible players for a draft year, independent of team boards."""
+        rows = self.session.execute(
+            select(PlayerRecord, CollegeRecord.name, CollegeRecord.abbreviation)
+            .outerjoin(CollegeRecord, CollegeRecord.id == PlayerRecord.college_id)
+            .where(
+                PlayerRecord.draft_year == draft.draft_year,
+                PlayerRecord.eligibility_status == "eligible",
+            )
+            .order_by(PlayerRecord.id)
+        ).all()
+        return [
+            {
+                "player_id": player.id,
+                "first_name": player.first_name,
+                "last_name": player.last_name,
+                "position": player.position,
+                "college_name": college_name,
+                "college_abbreviation": college_abbreviation,
+            }
+            for player, college_name, college_abbreviation in rows
+        ]
 
     @staticmethod
     def current_team_id(pick_count: int, draft_order: list[str] | None = None) -> str:

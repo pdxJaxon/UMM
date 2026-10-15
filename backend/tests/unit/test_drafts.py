@@ -167,6 +167,47 @@ def test_draft_requires_enough_eligible_prospects(isolate_draft_store: Session) 
         repository.create("user-1", "team-1", 2027)
 
 
+def test_start_draft_returns_all_eligible_players_for_the_draft_year(isolate_draft_store: Session) -> None:
+    """The UI draft pool should not be limited to the user's current team board."""
+    isolate_draft_store.add_all([
+        PlayerRecord(
+            id="wrong-year",
+            first_name="Wrong",
+            last_name="Year",
+            position="QB",
+            college_id="alabama",
+            draft_year=2027,
+        ),
+        PlayerRecord(
+            id="ineligible",
+            first_name="Ineligible",
+            last_name="Prospect",
+            position="QB",
+            college_id="alabama",
+            draft_year=2026,
+            eligibility_status="unconfirmed",
+        ),
+    ])
+    isolate_draft_store.commit()
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer " + create_access_token("user-1")}
+
+    response = client.post(
+        "/api/drafts",
+        json={"controlled_team_id": "team-1", "draft_year": 2026},
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    eligible_players = response.json()["eligible_players"]
+    assert len(eligible_players) == 32
+    assert {player["player_id"] for player in eligible_players} == {
+        player.id
+        for player in isolate_draft_store.query(PlayerRecord).all()
+        if player.draft_year == 2026 and player.eligibility_status == "eligible"
+    }
+
+
 def test_auto_simulation_executes_historic_trade_and_stops_for_controlled_team(isolate_draft_store: Session) -> None:
     """A strong trade-down and trade-up history should change the order before a pick."""
     observed_at = datetime.now(UTC)
