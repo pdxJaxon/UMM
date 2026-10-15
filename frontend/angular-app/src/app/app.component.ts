@@ -513,9 +513,7 @@ this.activeEntry = null;
     this.startingDraft = true;
     this.draftRunMessage = null;
     this.draftError = null;
-    const overrides = this.teamRandomnessOverrides[this.selectedTeamId] === undefined
-      ? {}
-      : { [this.selectedTeamId]: this.teamRandomnessOverrides[this.selectedTeamId] };
+    const overrides = { ...this.teamRandomnessOverrides };
     this.http.post<{ draft_run_id: string }>(
       `${this.apiBase}/api/drafts`,
       {
