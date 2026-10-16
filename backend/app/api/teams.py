@@ -190,6 +190,10 @@ def get_team_board(
                 "college_id": player.college_id if player else None,
                 "college_name": college.name if college else None,
                 "college_abbreviation": college.abbreviation if college else None,
+                "eligibility_status": player.eligibility_status if player else None,
+                "is_projected": player.eligibility_status == "unconfirmed" if player else False,
+                "source_rank": entry.score_breakdown.get("source_rank"),
+                "source_name": entry.score_breakdown.get("source_name"),
             }
         )
 

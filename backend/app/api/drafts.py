@@ -12,6 +12,7 @@ from app.db.models import DraftPickRecord, PlayerRecord, TeamRecord, UserRecord
 from app.db.session import get_db
 from app.services.draft_repository import DraftRepository
 from app.services.llm_prediction import OpenAICompatiblePredictionProvider, PredictionContext, predict_pick
+from app.services.prospect_pool import pool_filter
 
 router = APIRouter(prefix="/api/drafts", tags=["drafts"])
 
@@ -108,8 +109,7 @@ def predict_current_pick(
         eligible_candidate_ids = set(session.scalars(
             select(PlayerRecord.id).where(
                 PlayerRecord.id.in_(candidate_ids),
-                PlayerRecord.draft_year == draft.draft_year,
-                PlayerRecord.eligibility_status == "eligible",
+                pool_filter(draft.draft_year, draft.prospect_snapshot_id),
                 ~PlayerRecord.id.in_(
                     select(DraftPickRecord.player_id).where(DraftPickRecord.draft_run_id == draft.id)
                 ),

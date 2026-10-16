@@ -139,7 +139,7 @@
         </div>
         <select id="draft-player" [(ngModel)]="draftSelectedPlayerId" [disabled]="draftBusy || draftCandidates.length === 0">
           <option *ngFor="let candidate of draftCandidates" [value]="candidate.player_id">
-            {{ candidate.rank | number:'2.0-0' }} · {{ candidate.name }} · {{ candidate.position }} · {{ candidate.school }}
+            {{ candidate.rank | number:'2.0-0' }} · {{ candidate.name }} · {{ candidate.position }} · {{ candidate.school }}{{ candidate.projected ? ' · Projected' : '' }}
           </option>
         </select>
         <button class="action primary" (click)="submitDraftPick()" [disabled]="draftBusy || !draftSelectedPlayerId">Make pick</button>
@@ -199,7 +199,7 @@
             <span class="rank">{{ entry.rank | number:'2.0-0' }}</span>
             <div class="prospect" role="button" tabindex="0" [attr.aria-label]="'Inspect ' + entry.name" (keydown.enter)="selectEntry(entry)" (keydown.space)="selectEntry(entry); $event.preventDefault()">
               <strong>{{ entry.name }}</strong>
-              <div class="prospect-meta"><b>{{ entry.position }}</b><span>{{ entry.school }}</span></div>
+              <div class="prospect-meta"><b>{{ entry.position }}</b><span>{{ entry.school }}</span><span *ngIf="entry.projected">Projected</span></div>
             </div>
             <div class="row-signals" aria-label="Prospect signals">
               <span>Need <b>{{ entry.need | number:'1.0-0' }}</b></span>
@@ -222,6 +222,8 @@
         <div class="signal"><span>Team need</span><strong>{{ entry.need }}<i>%</i></strong><div class="meter"><b [style.width.%]="entry.need"></b></div></div>
         <div class="signal"><span>Team fit</span><strong>{{ entry.fit }}<i>%</i></strong><div class="meter"><b [style.width.%]="entry.fit"></b></div></div>
         <p class="source">Evidence: {{ entry.source }}</p>
+        <p *ngIf="entry.sourceRank != null" class="source">Source consensus rank: {{ entry.sourceRank }} (separate from UMM score)</p>
+        <p *ngIf="entry.projected" class="source">Projected prospect. Draft eligibility and declaration are unconfirmed; status and ranking may change.</p>
       </aside>
 
       <ng-template #emptyEvidence>
