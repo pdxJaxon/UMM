@@ -133,6 +133,10 @@ interface AuthResponse {
   favorite_team_id: string | null;
 }
 
+interface DataStatusResponse {
+  updated_on: string | null;
+}
+
 @Component({
   selector: 'umm-root',
   standalone: true,
@@ -151,6 +155,10 @@ export class AppComponent implements OnInit {
   protected loading = false;
   protected error: string | null = null;
   protected authMessage: string | null = null;
+  protected signedInEmail = '';
+  protected dataUpdatedOn: string | null = null;
+  protected dataDateError = false;
+  protected dataDateLoading = true;
   protected authEmail = '';
   protected authPassword = '';
   protected authFirstName = '';
@@ -181,6 +189,18 @@ export class AppComponent implements OnInit {
   constructor(private readonly http: HttpClient) {}
 
   ngOnInit(): void {
+    this.http.get<DataStatusResponse>(`${this.apiBase}/api/data/status`).subscribe({
+      next: (response) => {
+        this.dataUpdatedOn = response.updated_on;
+        this.dataDateError = false;
+        this.dataDateLoading = false;
+      },
+      error: () => {
+        this.dataUpdatedOn = null;
+        this.dataDateError = true;
+        this.dataDateLoading = false;
+      }
+    });
     this.http.get<TeamOption[]>(`${this.apiBase}/api/teams`).subscribe({
       next: (teams) => {
         this.teams = teams;
@@ -268,7 +288,7 @@ export class AppComponent implements OnInit {
     if (this.boardVersion !== null) {
       return `Default board v${this.boardVersion}`;
     }
-    return this.isAuthenticated ? 'Signed in' : 'Guest mode';
+    return this.isAuthenticated ? (this.loading ? 'Loading board...' : 'Board unavailable') : 'Guest mode';
   }
 
   protected get boardActionLabel(): string {
@@ -378,7 +398,7 @@ export class AppComponent implements OnInit {
       password: this.authPassword
     }).subscribe({
       next: (response) => {
-        this.completeAuthentication(response, 'Signed in.');
+        this.completeAuthentication(response);
       },
       error: (error: HttpErrorResponse) => {
         this.authMessage = this.describeApiError(error, 'Unable to sign in.');
@@ -467,6 +487,7 @@ export class AppComponent implements OnInit {
   protected logout(): void {
     this.authSession += 1;
     this.accessToken = '';
+    this.signedInEmail = '';
     this.favoriteTeamMessage = null;
     this.favoriteTeamId = '';
     this.preferredTeamId = null;
@@ -699,13 +720,14 @@ this.activeEntry = null;
       : this.entries[targetIndex] ?? null;
   }
 
-  private completeAuthentication(response: AuthResponse, message: string): void {
+  private completeAuthentication(response: AuthResponse, message: string | null = null): void {
     this.accessToken = response.access_token;
     this.preferredTeamId = response.favorite_team_id;
     this.favoriteTeamId = response.favorite_team_id ?? '';
     this.favoriteTeamMessage = null;
     this.applyPreferredTeam();
-    this.authMessage = `${message} Signed in as ${response.email}.`;
+    this.signedInEmail = response.email;
+    this.authMessage = message;
     this.authPassword = '';
     if (this.boardMode === 'personal') {
       this.loadBoard();

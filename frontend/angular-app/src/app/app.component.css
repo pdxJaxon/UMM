@@ -127,7 +127,22 @@ label,
 }
 
 .season {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px 12px;
   font-size: 15px;
+}
+
+.live-board,
+.updated-date {
+  white-space: nowrap;
+}
+
+.updated-date {
+  font-size: 11px;
+  letter-spacing: .02em;
 }
 
 .season-label {
@@ -145,6 +160,7 @@ label,
 }
 
 .profile {
+  flex-shrink: 0;
   width: 34px;
   height: 34px;
   border: 0;
@@ -185,6 +201,7 @@ label,
 
 .account-copy strong {
   font-size: 14px;
+  overflow-wrap: anywhere;
 }
 
 .account-copy span,
@@ -310,24 +327,11 @@ label,
   transform: rotate(7deg);
 }
 
-.guest-workspace h1 {
-  max-width: 720px;
-  margin: 12px 0 20px;
-  color: #1d2a2d;
-  font: 800 clamp(40px, 5.5vw, 68px)/.94 Georgia, serif;
-  letter-spacing: -.03em;
-}
-
-.guest-workspace h1 em {
-  color: var(--team-primary);
-  font-style: normal;
-}
-
 .guest-copy {
-  max-width: 460px;
+  max-width: 560px;
   margin: 0;
   color: #65716e;
-  font-size: 17px;
+  font-size: 21px;
   line-height: 1.55;
 }
 
@@ -337,7 +341,7 @@ label,
   padding: 10px 0 10px 16px;
   border-left: 4px solid var(--team-primary);
   color: var(--team-primary);
-  font: 700 18px/1.35 Georgia, serif;
+  font: 700 22px/1.35 Georgia, serif;
 }
 
 .guest-signals {
@@ -926,7 +930,10 @@ label,
   }
 
   .topbar {
-    height: 60px;
+    min-height: 76px;
+    height: auto;
+    gap: 8px;
+    padding: 6px 0;
   }
 
   .account-bar,
@@ -1005,11 +1012,12 @@ label,
   }
 
   .season {
-    max-width: 130px;
+    max-width: 160px;
     font-size: 10px;
     line-height: 1.5;
     letter-spacing: .08em;
     text-align: right;
+    gap: 2px 6px;
   }
 
   .brand small {

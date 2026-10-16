@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from datetime import date
 
 from dotenv import load_dotenv
 
@@ -34,10 +35,12 @@ class Settings:
     llm_model: str = "gpt-5"
     llm_request_timeout_seconds: float = 45.0
     llm_prompt_version: str = "umm-pick-v1"
+    data_updated_on: date | None = None
 
     @classmethod
     def from_environment(cls) -> "Settings":
         """Build settings from environment variables with local defaults."""
+        data_updated_on = os.getenv("DATA_UPDATED_ON", "").strip()
         return cls(
             app_name=os.getenv("APP_NAME", cls.app_name),
             environment=os.getenv("APP_ENV", cls.environment).strip().lower(),
@@ -69,6 +72,7 @@ class Settings:
                 os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", str(cls.llm_request_timeout_seconds))
             ),
             llm_prompt_version=os.getenv("LLM_PROMPT_VERSION", cls.llm_prompt_version),
+            data_updated_on=date.fromisoformat(data_updated_on) if data_updated_on else None,
         )
 
 
