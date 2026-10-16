@@ -531,6 +531,26 @@ label,
   padding-bottom: 18px;
 }
 
+.recommendation-panel {
+  padding: 18px;
+  margin: 16px 0;
+  border: 1px solid var(--team-primary);
+  background: #fff;
+  overflow-wrap: anywhere;
+}
+
+.recommendation-panel h3 {
+  margin: 8px 0;
+  font: 800 24px Georgia, serif;
+}
+
+.recommendation-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
 .draft-room-header .eyebrow {
   margin-bottom: 7px;
 }

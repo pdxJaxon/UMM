@@ -14,6 +14,10 @@ finally {
 
 Push-Location (Join-Path $repositoryRoot "frontend\angular-app")
 try {
+    npm run test:unit
+    if ($LASTEXITCODE -ne 0) {
+        throw "Frontend unit tests failed."
+    }
     npm run build
 }
 finally {

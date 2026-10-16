@@ -139,6 +139,29 @@
 
       <div *ngIf="draftBusy" class="draft-status" role="status" aria-live="polite">Updating the draft board…</div>
 
+      <section *ngIf="draftOnControlledTeam" class="recommendation-panel" aria-label="Engine recommendation" aria-live="polite">
+        <p class="eyebrow">ENGINE RECOMMENDATION / ADVISORY ONLY</p>
+        <p *ngIf="recommendationLoading" role="status">Reviewing available prospects and team evidence...</p>
+        <p *ngIf="recommendationError" class="draft-error" role="alert">{{ recommendationError }}</p>
+        <ng-container *ngIf="recommendation as suggestion">
+          <h3>{{ suggestion.recommended.name }}</h3>
+          <p>Available-pool rank {{ suggestion.recommended.rank }} · {{ suggestion.recommended.position }} · {{ suggestion.recommended.college_name ?? 'School unavailable' }}</p>
+          <p *ngIf="suggestion.recommended.source_rank != null">Source consensus rank {{ suggestion.recommended.source_rank }}</p>
+          <p *ngIf="suggestion.recommended.is_projected">Projected prospect; eligibility and declaration are unconfirmed.</p>
+          <p>Model confidence: {{ suggestion.confidence | percent:'1.0-0' }} · {{ suggestion.model }}</p>
+          <ul><li *ngFor="let reason of suggestion.reasoning_factors">{{ reason }}</li></ul>
+          <p *ngIf="!suggestion.reasoning_factors.length">The model supplied no explanation.</p>
+          <p *ngIf="suggestion.evidence.length">Model-cited evidence: {{ suggestion.evidence.join('; ') }}</p>
+          <small>Rank basis: {{ suggestion.rank_basis }}. AI explanations are advisory, not verified scouting facts.</small>
+          <div class="recommendation-actions">
+            <button class="action" (click)="chooseRecommendation(suggestion.recommended.player_id)" [disabled]="draftBusy">Choose {{ suggestion.recommended.name }}</button>
+            <button *ngFor="let alternative of suggestion.alternatives" class="action" (click)="chooseRecommendation(alternative.player_id)" [disabled]="draftBusy">Alternative: {{ alternative.name }} · rank {{ alternative.rank }}</button>
+          </div>
+          <p>Choosing a prospect only fills the selector below. Press Make pick to confirm, or select anyone else.</p>
+        </ng-container>
+        <button class="text-button" (click)="loadRecommendation()" [disabled]="recommendationLoading || draftBusy">{{ recommendationError ? 'Retry recommendation' : 'Refresh recommendation' }}</button>
+      </section>
+
       <div *ngIf="draft.draft_run.status === 'drafting' && draftOnControlledTeam" class="draft-on-clock">
         <div>
           <p class="eyebrow">YOUR PICK / {{ draft.current_pick_number | number:'2.0-0' }}</p>
@@ -158,7 +181,7 @@
       </div>
 
       <div class="draft-history-heading">
-        <h3>Pick log</h3>
+        <h3>{{ draft.draft_run.status === 'completed' ? 'First-round recap' : 'Pick log' }}</h3>
         <span>{{ draft.picks.length }} picks</span>
       </div>
       <ol class="draft-pick-list">

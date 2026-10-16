@@ -5,7 +5,8 @@
   "scripts": {
     "start": "ng serve",
     "build": "ng build",
-    "test": "ng build"
+    "test": "ng build",
+    "test:unit": "node --test tests/*.test.cjs"
   },
   "dependencies": {
     "@angular/common": "^18.2.0",
