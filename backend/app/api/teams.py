@@ -190,6 +190,7 @@ def get_team_board(
                 "college_id": player.college_id if player else None,
                 "college_name": college.name if college else None,
                 "college_abbreviation": college.abbreviation if college else None,
+                "college_logo_url": college.logo_url if college else None,
             }
         )
 

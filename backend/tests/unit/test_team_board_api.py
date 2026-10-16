@@ -75,6 +75,7 @@ def test_team_board_endpoint_includes_player_details() -> None:
         assert payload["last_name"] == "Tagovailoa"
         assert payload["position"] == "QB"
         assert payload["college_name"] == "Alabama"
+        assert payload["college_logo_url"] == "logo"
     finally:
         app.dependency_overrides.clear()
         session.close()
