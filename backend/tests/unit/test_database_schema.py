@@ -4,9 +4,18 @@ from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
 
 from app.db import initialize as database_initialize
+from app.db.college_seed import COLLEGES, ESPN_TEAM_IDS, college_logo_url
 from app.db.initialize import seed_reference_data
 from app.db.models import CollegeRecord, PlayerRecord, PositionImportanceRecord, TeamRecord
 from app.db.session import Base
+
+
+def test_college_logo_references_cover_seeded_schools_and_preserve_custom_artwork() -> None:
+    assert {college["id"] for college in COLLEGES} == set(ESPN_TEAM_IDS)
+    assert all(college["logo_url"].rsplit("/", 1)[-1].removesuffix(".png").isdigit() for college in COLLEGES)
+    assert college_logo_url("ohio-state", "") == "https://a.espncdn.com/i/teamlogos/ncaa/500/194.png"
+    assert college_logo_url("alabama", "https://school.example/logo.svg") == "https://school.example/logo.svg"
+    assert college_logo_url("unknown-school", "") == ""
 
 
 def test_database_schema_contains_core_tables() -> None:
