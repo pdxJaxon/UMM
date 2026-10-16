@@ -703,7 +703,7 @@ label,
 
 .board-row {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 74px 28px;
+  grid-template-columns: 42px minmax(0, 1fr) 74px max-content 28px;
   gap: 12px;
   align-items: center;
   padding: 18px 20px;
