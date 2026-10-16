@@ -76,6 +76,75 @@ class DraftRepository:
             raise PermissionError("Draft access denied")
         return draft
 
+    def recommend(self, draft: DraftRunRecord) -> dict[str, object]:
+        """Recommend, but never persist, a controlled-team pick from stored evidence."""
+        picks = self._ordered_picks(draft.id)
+        pick_number = len(picks) + 1
+        if draft.status != "drafting" or self.current_team_id(len(picks), self._draft_order(draft)) != draft.controlled_team_id:
+            raise ValueError("Recommendations are only available when your team is on the clock")
+        selected = {pick.player_id for pick in picks}
+        pool = {row["player_id"]: row for row in self.eligible_players(draft) if row["player_id"] not in selected}
+        ordered_ids = self._available_board_candidates(draft, draft.controlled_team_id, selected)
+        ordered_ids.extend(player_id for player_id in pool if player_id not in ordered_ids)
+        if not ordered_ids:
+            raise ValueError("No available prospects remain for a recommendation")
+        if self.prediction_provider is None:
+            raise RuntimeError("AI recommendations are unavailable: LLM_API_KEY is not configured")
+        candidates = self._candidate_context(ordered_ids, draft)
+        for rank, candidate in enumerate(candidates, 1):
+            player = pool[str(candidate["player_id"])]
+            candidate.update({
+                "rank": rank,
+                "name": f"{player['first_name']} {player['last_name']}",
+                "college_name": player["college_name"],
+            })
+        team = self.session.get(TeamRecord, draft.controlled_team_id)
+        if team is None:
+            raise ValueError("Controlled team does not exist")
+        result = predict_pick(
+            PredictionContext(
+                team_id=team.id, team_name=team.name, draft_year=draft.draft_year,
+                pick_number=pick_number, candidates=tuple(candidates),
+                team_needs=tuple(self._team_needs(team.id, draft.draft_year)),
+                team_tendencies=tuple(self._team_tendencies(team.id, draft.draft_year)),
+                overall_randomness=float(draft.overall_randomness),
+                team_randomness=float(draft.randomness_overrides.get(team.id, team.randomness_score or 0)),
+            ),
+            self.prediction_provider,
+        )
+        alternative_ids = []
+        for alternative in result.alternatives:
+            if (
+                not isinstance(alternative, dict)
+                or not isinstance(alternative.get("player_id"), str)
+                or alternative["player_id"] not in pool
+            ):
+                raise ValueError("AI recommendation returned an unavailable alternative")
+            player_id = alternative["player_id"]
+            if player_id == result.selected_player_id or player_id in alternative_ids:
+                raise ValueError("AI recommendation returned duplicate alternatives")
+            alternative_ids.append(player_id)
+        self.session.refresh(draft)
+        current_picks = self._ordered_picks(draft.id)
+        current_available = {
+            row["player_id"] for row in self.eligible_players(draft)
+        } - {pick.player_id for pick in current_picks}
+        if (
+            draft.status != "drafting" or len(current_picks) + 1 != pick_number
+            or self.current_team_id(len(current_picks), self._draft_order(draft)) != team.id
+            or not {result.selected_player_id, *alternative_ids} <= current_available
+        ):
+            raise ValueError("Draft availability changed while recommending; request a fresh recommendation")
+        by_id = {str(candidate["player_id"]): candidate for candidate in candidates}
+        return {
+            "draft_run_id": draft.id, "team_id": team.id, "pick_number": pick_number,
+            "recommended": by_id[result.selected_player_id],
+            "alternatives": [by_id[player_id] for player_id in alternative_ids],
+            "confidence": result.confidence, "reasoning_factors": result.reasoning_factors,
+            "evidence": result.evidence, "provider": result.provider, "model": result.model,
+            "rank_basis": "UMM default board, then pinned source order",
+        }
+
     def add_pick(
         self,
         draft: DraftRunRecord,

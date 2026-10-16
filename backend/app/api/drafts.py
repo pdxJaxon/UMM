@@ -155,6 +155,29 @@ def predict_current_pick(
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
+@router.post("/{draft_id}/recommendation")
+def recommend_current_pick(
+    draft_id: str,
+    current_user: UserRecord = Depends(get_current_user),
+    session: Session = Depends(get_db),
+) -> dict[str, object]:
+    """Return an advisory recommendation using only server-side draft evidence."""
+    provider = OpenAICompatiblePredictionProvider()
+    try:
+        repository = DraftRepository(session, prediction_provider=provider)
+        return repository.recommend(repository.get_owned(draft_id, current_user.id))
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        provider.close()
+
+
 @router.post("/{draft_id}/picks", status_code=201)
 def create_pick(
     draft_id: str,

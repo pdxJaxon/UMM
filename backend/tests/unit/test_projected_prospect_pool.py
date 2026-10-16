@@ -269,3 +269,142 @@ def test_approval_cli_defaults_to_preview(session, tmp_path, monkeypatch, capsys
     assert json.loads(capsys.readouterr().out)["status"] == "approved"
     session.expire_all()
     assert session.get(ProspectBoardSnapshotRecord, report["snapshot_id"]).projected_pool_approved_at is not None
+
+
+@pytest.mark.parametrize("controlled_team", ["team-1", "team-32"])
+def test_recommendation_is_advisory_and_uses_available_persisted_evidence(session, tmp_path, controlled_team):
+    report = _import(session, tmp_path)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    session.commit()
+    repository = DraftRepository(session)
+    draft = repository.create(
+        "user", controlled_team, 2027,
+        randomness_overrides={f"team-{number}": 0 for number in range(1, 33)},
+        overall_randomness=0,
+    )
+    repository.auto_simulate(draft)
+    before = repository.state(draft)["picks"]
+
+    class Provider:
+        provider_name = "test"
+        model_name = "test-model"
+
+        def complete(self, prompt, randomness):
+            payload = json.loads(prompt)
+            candidates = payload["candidates"]
+            picked = {pick["player_id"] for pick in before}
+            assert not picked & {candidate["player_id"] for candidate in candidates}
+            assert candidates[0]["source_rank"] is not None
+            assert candidates[0]["rank"] == 1
+            assert payload["draft"]["team_id"] == controlled_team
+            return {
+                "selected_player_id": candidates[0]["player_id"], "confidence": .8,
+                "alternatives": [{"player_id": candidates[1]["player_id"], "score": .7}],
+                "reasoning_factors": ["Highest available source rank"], "evidence": ["source_rank"],
+            }
+
+    repository.prediction_provider = Provider()
+    suggestion = repository.recommend(draft)
+    assert suggestion["pick_number"] == len(before) + 1
+    assert suggestion["recommended"]["rank"] == 1
+    assert suggestion["alternatives"][0]["player_id"] != suggestion["recommended"]["player_id"]
+    assert repository.state(draft)["picks"] == before
+    assert draft.status == "drafting"
+    repository.add_pick(draft, controlled_team, suggestion["alternatives"][0]["player_id"], "USER")
+    repository.prediction_provider = None
+    repository.auto_simulate(draft)
+    completed = repository.state(draft)
+    assert completed["draft_run"]["status"] == "completed"
+    assert len({pick["player_id"] for pick in completed["picks"]}) == 32
+    with pytest.raises(ValueError, match="on the clock"):
+        repository.recommend(draft)
+
+
+def test_recommendation_rejects_wrong_turn_unavailable_model_and_stale_player(session, tmp_path):
+    report = _import(session, tmp_path)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    session.commit()
+    repository = DraftRepository(session)
+    draft = repository.create("user", "team-32", 2027)
+    with pytest.raises(ValueError, match="on the clock"):
+        repository.recommend(draft)
+    repository.auto_simulate(draft)
+    with pytest.raises(RuntimeError, match="LLM_API_KEY"):
+        repository.recommend(draft)
+
+    class Provider:
+        provider_name = "test"
+        model_name = "test-model"
+
+        def complete(self, prompt, randomness):
+            player_id = json.loads(prompt)["candidates"][0]["player_id"]
+            session.get(PlayerRecord, player_id).eligibility_status = "withdrawn"
+            session.flush()
+            return {"selected_player_id": player_id, "confidence": .8}
+
+    repository.prediction_provider = Provider()
+    with pytest.raises(ValueError, match="availability changed"):
+        repository.recommend(draft)
+    assert len(repository.state(draft)["picks"]) == 31
+
+
+def test_recommendation_endpoint_owns_draft_and_closes_provider_without_saving_picks(session, tmp_path, monkeypatch):
+    from app.api import drafts
+
+    report = _import(session, tmp_path)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    session.commit()
+    repository = DraftRepository(session)
+    draft = repository.create("user", "team-1", 2027)
+    session.commit()
+    closed = []
+
+    class Provider:
+        provider_name = "test"
+        model_name = "test-model"
+
+        def complete(self, prompt, randomness):
+            return {"selected_player_id": json.loads(prompt)["candidates"][0]["player_id"], "confidence": .8}
+
+        def close(self):
+            closed.append(True)
+
+    monkeypatch.setattr(drafts, "OpenAICompatiblePredictionProvider", Provider)
+    app.dependency_overrides[get_db] = lambda: session
+    headers = {"Authorization": f"Bearer {create_access_token('user')}"}
+    try:
+        with TestClient(app) as client:
+            url = f"/api/drafts/{draft.id}/recommendation"
+            assert client.post(url).status_code == 401
+            result = client.post(url, headers=headers)
+            assert result.status_code == 200, result.text
+            assert result.json()["recommended"]["source_rank"] == 1
+            assert repository.state(draft)["picks"] == []
+            assert client.post("/api/drafts/missing/recommendation", headers=headers).status_code == 404
+            draft.user_id = "someone-else"
+            assert client.post(url, headers=headers).status_code == 403
+            assert len(closed) == 3
+    finally:
+        app.dependency_overrides.clear()
+
+
+@pytest.mark.parametrize("alternative", [{"player_id": "missing"}, {"player_id": []}])
+def test_recommendation_rejects_invalid_alternatives(session, tmp_path, alternative):
+    report = _import(session, tmp_path)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    session.commit()
+
+    class Provider:
+        provider_name = "test"
+        model_name = "test-model"
+
+        def complete(self, prompt, randomness):
+            return {
+                "selected_player_id": json.loads(prompt)["candidates"][0]["player_id"],
+                "confidence": .8, "alternatives": [alternative],
+            }
+
+    repository = DraftRepository(session, Provider())
+    draft = repository.create("user", "team-1", 2027)
+    with pytest.raises(ValueError, match="unavailable alternative"):
+        repository.recommend(draft)

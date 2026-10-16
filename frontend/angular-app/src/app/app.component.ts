@@ -137,6 +137,30 @@ interface DataStatusResponse {
   updated_on: string | null;
 }
 
+interface RecommendationCandidate {
+  player_id: string;
+  name: string;
+  rank: number;
+  position: string;
+  college_name: string | null;
+  source_rank: number | null;
+  is_projected: boolean;
+}
+
+interface DraftRecommendation {
+  draft_run_id: string;
+  team_id: string;
+  pick_number: number;
+  recommended: RecommendationCandidate;
+  alternatives: RecommendationCandidate[];
+  confidence: number;
+  reasoning_factors: string[];
+  evidence: string[];
+  provider: string;
+  model: string;
+  rank_basis: string;
+}
+
 @Component({
   selector: 'umm-root',
   standalone: true,
@@ -178,6 +202,10 @@ export class AppComponent implements OnInit {
   protected draftError: string | null = null;
   protected draftBusy = false;
   protected draftSelectedPlayerId = '';
+  protected recommendation: DraftRecommendation | null = null;
+  protected recommendationLoading = false;
+  protected recommendationError: string | null = null;
+  private recommendationRequest = 0;
   private draggedPlayerId: string | null = null;
 
   private readonly apiBase = 'http://localhost:8000';
@@ -485,6 +513,7 @@ export class AppComponent implements OnInit {
   }
 
   protected logout(): void {
+    this.clearRecommendation();
     this.authSession += 1;
     this.accessToken = '';
     this.signedInEmail = '';
@@ -599,6 +628,7 @@ this.activeEntry = null;
     const state = this.draftState;
     if (!state || !this.draftOnControlledTeam || !this.draftSelectedPlayerId || this.draftBusy) return;
 
+    this.clearRecommendation();
     this.draftBusy = true;
     this.draftError = null;
     const authSession = this.authSession;
@@ -616,6 +646,7 @@ this.activeEntry = null;
         if (authSession !== this.authSession) return;
         this.draftBusy = false;
         this.draftError = this.describeApiError(error, 'Unable to submit your pick.');
+        this.loadRecommendation();
       }
     });
   }
@@ -628,6 +659,7 @@ this.activeEntry = null;
 
   protected closeDraft(): void {
     if (this.draftState?.draft_run.status !== 'completed') return;
+    this.clearRecommendation();
     this.draftState = null;
     this.draftEntries = [];
     this.draftId = null;
@@ -641,6 +673,7 @@ this.activeEntry = null;
   }
 
   private advanceDraft(draftId: string): void {
+    this.clearRecommendation();
     this.draftBusy = true;
     this.draftError = null;
     const authSession = this.authSession;
@@ -653,6 +686,7 @@ this.activeEntry = null;
         if (authSession !== this.authSession) return;
         this.setDraftState(state);
         this.draftBusy = false;
+        this.loadRecommendation();
       },
       error: (error: HttpErrorResponse) => {
         if (authSession !== this.authSession) return;
@@ -663,12 +697,66 @@ this.activeEntry = null;
   }
 
   private setDraftState(state: DraftStateResponse): void {
+    this.clearRecommendation();
     this.draftState = state;
     this.draftId = state.draft_run.id;
     const available = this.draftEntries.filter((entry) => !state.picks.some((pick) => pick.player_id === entry.player_id));
     if (!available.some((entry) => entry.player_id === this.draftSelectedPlayerId)) {
       this.draftSelectedPlayerId = available[0]?.player_id ?? '';
     }
+  }
+
+  protected loadRecommendation(): void {
+    this.clearRecommendation();
+    const state = this.draftState;
+    if (!state || !this.draftOnControlledTeam || this.draftBusy) return;
+    if (!this.draftCandidates.length) {
+      this.recommendationError = 'No available prospects remain for a recommendation.';
+      return;
+    }
+    const request = this.recommendationRequest;
+    const authSession = this.authSession;
+    const pickNumber = state.current_pick_number;
+    this.recommendationLoading = true;
+    this.http.post<DraftRecommendation>(
+      `${this.apiBase}/api/drafts/${state.draft_run.id}/recommendation`, {}, this.requestOptions(true)
+    ).subscribe({
+      next: (result) => {
+        if (request !== this.recommendationRequest || authSession !== this.authSession) return;
+        this.recommendationLoading = false;
+        const current = this.draftState;
+        const available = new Set(this.draftCandidates.map((candidate) => candidate.player_id));
+        if (!current || !this.draftOnControlledTeam
+          || current.draft_run.id !== result.draft_run_id
+          || current.current_pick_number !== pickNumber || result.pick_number !== pickNumber
+          || result.team_id !== current.current_team_id
+          || !available.has(result.recommended.player_id)
+          || result.alternatives.some((candidate) => !available.has(candidate.player_id))) {
+          this.recommendationError = 'The recommendation is no longer current. Request a fresh recommendation.';
+          return;
+        }
+        this.recommendation = result;
+      },
+      error: (error: HttpErrorResponse) => {
+        if (request !== this.recommendationRequest || authSession !== this.authSession) return;
+        this.recommendationLoading = false;
+        this.recommendationError = this.describeApiError(error, 'Unable to load the AI recommendation. You can still choose your own prospect.');
+      }
+    });
+  }
+
+  protected chooseRecommendation(playerId: string): void {
+    if (!this.draftOnControlledTeam || this.draftBusy) return;
+    if (this.draftCandidates.some((candidate) => candidate.player_id === playerId)) {
+      this.draftSelectedPlayerId = playerId;
+    }
+  }
+
+  private clearRecommendation(): void {
+    this.recommendationRequest += 1;
+    this.recommendation = null;
+    this.recommendationError = null;
+    this.recommendationLoading = false;
   }
 
   protected moveEntry(index: number, direction: -1 | 1): void {
