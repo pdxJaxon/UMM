@@ -16,7 +16,18 @@ def _session() -> Session:
     session = Session(engine)
     session.add(UserRecord(id="user-1", email="user@example.com", password_hash="hash", first_name="Test", last_name="User"))
     session.add_all([TeamRecord(**team) for team in TEAMS])
-    session.add_all([PlayerRecord(**player) for player in PLAYERS])
+    session.add_all([PlayerRecord(**{**player, "draft_year": 2026}) for player in PLAYERS])
+    session.add_all(
+        PlayerRecord(
+            id=f"draft-class-{number:02d}",
+            first_name="Draft",
+            last_name=f"Prospect {number}",
+            position="ATH",
+            college_id="alabama",
+            draft_year=2026,
+        )
+        for number in range(1, 28)
+    )
     session.commit()
     return session
 

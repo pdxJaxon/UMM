@@ -94,7 +94,7 @@ def predict_current_pick(
     repository = DraftRepository(session)
     try:
         draft = repository.get_owned(draft_id, current_user.id)
-        expected_team_id = repository.current_team_id(len(draft.picks))
+        expected_team_id = repository.current_team_id(len(draft.picks), draft.draft_order)
         if payload.team_id != expected_team_id:
             raise ValueError("Prediction requested for a team that is not on the clock")
         team = session.get(TeamRecord, payload.team_id)
@@ -106,7 +106,7 @@ def predict_current_pick(
                 team_id=payload.team_id,
                 team_name=team.name,
                 draft_year=draft.draft_year,
-                pick_number=payload.pick_number,
+                pick_number=len(draft.picks) + 1,
                 candidates=tuple(payload.candidates),
                 team_needs=tuple(payload.team_needs),
                 team_tendencies=tuple(payload.team_tendencies),

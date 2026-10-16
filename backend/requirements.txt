@@ -10,3 +10,4 @@ redis==5.2.1
 python-dotenv==1.0.1
 beautifulsoup4==4.12.3
 nflreadpy==0.1.5
+playwright==1.64.0

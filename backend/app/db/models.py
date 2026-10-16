@@ -106,6 +106,9 @@ class TeamDraftingTendencyRecord(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
     draft_year = Column(Integer, nullable=True, index=True)
+    actor_type = Column(String(20), nullable=True, index=True)
+    actor_id = Column(String(120), nullable=True, index=True)
+    actor_name = Column(String(150), nullable=True)
     tendency_type = Column(String(40), nullable=False)
     position_code = Column(String(20), nullable=True)
     metric_name = Column(String(60), nullable=True)
@@ -122,6 +125,47 @@ class TeamDraftingTendencyRecord(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     raw_payload = Column(JSON, nullable=False, default=dict)
     team = relationship("TeamRecord", back_populates="drafting_tendencies")
+
+
+class HistoricalDraftTradeRecord(Base):
+    """Historical draft-pick transfer inferred from a source ownership change."""
+
+    __tablename__ = "historical_draft_trades"
+    __table_args__ = (UniqueConstraint("source_name", "draft_year", "pick_number", name="uq_historical_trade_source_pick"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    draft_year = Column(Integer, nullable=False, index=True)
+    pick_number = Column(Integer, nullable=False)
+    moving_up_team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    moving_down_team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    general_manager_id = Column(String(120), nullable=True, index=True)
+    general_manager_name = Column(String(150), nullable=True)
+    head_coach_id = Column(String(120), nullable=True, index=True)
+    head_coach_name = Column(String(150), nullable=True)
+    source_name = Column(String(100), nullable=False)
+    source_url = Column(String(500), nullable=True)
+    observed_at = Column(DateTime, nullable=False)
+    raw_payload = Column(JSON, nullable=False, default=dict)
+
+
+class TeamLeadershipRecord(Base):
+    """Team-to-leader assignment used to apply regime-specific tendencies."""
+
+    __tablename__ = "team_leadership"
+    __table_args__ = (UniqueConstraint("team_id", "role_type", "person_id", "start_year", name="uq_team_leadership_period"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    team_id = Column(String(64), ForeignKey("teams.id"), nullable=False, index=True)
+    role_type = Column(String(20), nullable=False)
+    person_id = Column(String(120), nullable=False, index=True)
+    person_name = Column(String(150), nullable=False)
+    start_year = Column(Integer, nullable=False)
+    end_year = Column(Integer, nullable=True)
+    source_name = Column(String(100), nullable=False)
+    source_url = Column(String(500), nullable=True)
+    observed_at = Column(DateTime, nullable=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    raw_payload = Column(JSON, nullable=False, default=dict)
 
 
 class TeamProspectMeetingRecord(Base):
@@ -241,6 +285,57 @@ class PlayerRecord(Base):
     derogatory_concerns = relationship("PlayerDerogatoryConcernRecord", back_populates="player", cascade="all, delete-orphan")
 
 
+class ProspectSourceIdentityRecord(Base):
+    """Persistent reviewed mapping from a source identity to a UMM player."""
+
+    __tablename__ = "prospect_source_identities"
+    __table_args__ = (UniqueConstraint("source_name", "source_key", name="uq_prospect_source_identity"),)
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    source_name = Column(String(100), nullable=False)
+    source_key = Column(String(160), nullable=False)
+    player_id = Column(String(64), ForeignKey("players.id"), nullable=False, index=True)
+    source_record_id = Column(String(150), nullable=True)
+
+
+class ProspectBoardSnapshotRecord(Base):
+    """Immutable provenance for one imported external prospect board."""
+
+    __tablename__ = "prospect_board_snapshots"
+
+    id = Column(String(64), primary_key=True)
+    content_hash = Column(String(64), unique=True, nullable=False)
+    source_name = Column(String(100), nullable=False)
+    source_url = Column(String(500), nullable=False)
+    draft_year = Column(Integer, nullable=False, index=True)
+    collected_at = Column(DateTime, nullable=False)
+    source_updated_at_display = Column(String(200), nullable=True)
+    collection_method = Column(String(200), nullable=False)
+    scope = Column(Text, nullable=False)
+    prospect_count = Column(Integer, nullable=False)
+
+
+class ProspectBoardRankingRecord(Base):
+    """Source ranking and grade, kept separate from athletic and UMM scores."""
+
+    __tablename__ = "prospect_board_rankings"
+    __table_args__ = (
+        UniqueConstraint("snapshot_id", "player_id", name="uq_prospect_snapshot_player"),
+        UniqueConstraint("snapshot_id", "overall_rank", name="uq_prospect_snapshot_rank"),
+    )
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    snapshot_id = Column(String(64), ForeignKey("prospect_board_snapshots.id"), nullable=False, index=True)
+    player_id = Column(String(64), ForeignKey("players.id"), nullable=False, index=True)
+    overall_rank = Column(Integer, nullable=False)
+    pff_grade = Column(Numeric(5, 2), nullable=True)
+    source_name_display = Column(String(200), nullable=False)
+    source_position = Column(String(20), nullable=False)
+    source_school = Column(String(150), nullable=False)
+    canonical_position = Column(String(20), nullable=False)
+    college_id = Column(String(100), ForeignKey("colleges.id"), nullable=False)
+
+
 class PlayerDerogatoryConcernRecord(Base):
     """Auditable negative-issue record with explicit severity and confidence."""
 
@@ -313,8 +408,10 @@ class DraftRunRecord(Base):
     completed_at = Column(DateTime, nullable=True)
     overall_randomness = Column(Numeric(5, 2), nullable=False, default=50)
     randomness_overrides = Column(JSON, nullable=False, default=dict)
+    draft_order = Column(JSON, nullable=False, default=list)
     user = relationship("UserRecord", back_populates="drafts")
     picks = relationship("DraftPickRecord", back_populates="draft_run", cascade="all, delete-orphan")
+    trades = relationship("DraftTradeRecord", back_populates="draft_run", cascade="all, delete-orphan")
 
 
 class DraftPickRecord(Base):
@@ -334,3 +431,24 @@ class DraftPickRecord(Base):
     prediction_metadata = Column(JSON, nullable=False, default=dict)
     selected_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     draft_run = relationship("DraftRunRecord", back_populates="picks")
+
+
+class DraftTradeRecord(Base):
+    """Auditable draft-order swap executed during a mock draft."""
+
+    __tablename__ = "draft_trades"
+
+    id = Column(String(64), primary_key=True)
+    draft_run_id = Column(String(64), ForeignKey("draft_runs.id"), index=True, nullable=False)
+    trade_number = Column(Integer, nullable=False)
+    pick_number = Column(Integer, nullable=False)
+    acquired_pick_number = Column(Integer, nullable=False)
+    moving_up_team_id = Column(String(64), ForeignKey("teams.id"), nullable=False)
+    moving_down_team_id = Column(String(64), ForeignKey("teams.id"), nullable=False)
+    direction = Column(String(20), nullable=False)
+    current_pick_value = Column(Numeric(8, 2), nullable=False)
+    acquired_pick_value = Column(Numeric(8, 2), nullable=False)
+    value_delta = Column(Numeric(8, 2), nullable=False)
+    tendency_evidence = Column(JSON, nullable=False, default=dict)
+    executed_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
+    draft_run = relationship("DraftRunRecord", back_populates="trades")

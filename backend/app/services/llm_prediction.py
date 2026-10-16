@@ -76,20 +76,23 @@ class OpenAICompatiblePredictionProvider:
         """Request one JSON prediction and reject malformed provider responses."""
         if not self.api_key:
             raise RuntimeError("LLM_API_KEY is not configured")
-        response = self.client.post(
-            self.api_url,
-            headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
-            json={
-                "model": self.model_name,
-                "temperature": _temperature_from_randomness(randomness),
-                "response_format": {"type": "json_object"},
-                "messages": [
-                    {"role": "system", "content": "Return only the requested JSON object."},
-                    {"role": "user", "content": prompt},
-                ],
-            },
-        )
-        response.raise_for_status()
+        try:
+            response = self.client.post(
+                self.api_url,
+                headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
+                json={
+                    "model": self.model_name,
+                    "temperature": _temperature_from_randomness(randomness),
+                    "response_format": {"type": "json_object"},
+                    "messages": [
+                        {"role": "system", "content": "Return only the requested JSON object."},
+                        {"role": "user", "content": prompt},
+                    ],
+                },
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RuntimeError("LLM provider request failed") from exc
         payload = response.json()
         try:
             content = payload["choices"][0]["message"]["content"]

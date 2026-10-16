@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
 from app.db.initialize import PLAYERS, TEAMS
-from app.db.models import DraftPickRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, UserRecord
+from app.db.models import DraftPickRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamDraftingTendencyRecord, TeamRecord, UserRecord
 from app.db.session import Base, get_db
 from app.main import app
 from app.services.draft_repository import DraftRepository
@@ -45,7 +45,18 @@ def isolate_draft_store() -> None:
         ]
     )
     session.add_all([TeamRecord(**team) for team in TEAMS])
-    session.add_all([PlayerRecord(**player) for player in PLAYERS])
+    session.add_all([PlayerRecord(**{**player, "draft_year": 2026}) for player in PLAYERS])
+    session.add_all(
+        PlayerRecord(
+            id=f"draft-class-{number:02d}",
+            first_name="Draft",
+            last_name=f"Prospect {number}",
+            position="ATH",
+            college_id="alabama",
+            draft_year=2026,
+        )
+        for number in range(1, 28)
+    )
     session.commit()
 
     def override_get_db():
@@ -89,6 +100,105 @@ def test_controlled_team_flow_auto_simulates_other_teams() -> None:
     )
     assert response.status_code == 201
     assert response.json()["picks"][1]["selection_source"] == "USER"
+
+
+def test_draft_uses_seeded_team_order_and_all_persisted_prospects(isolate_draft_store: Session) -> None:
+    """Draft order and valid picks should come from persisted league data, not fixtures."""
+    repository = DraftRepository(isolate_draft_store)
+    draft = repository.create("user-1", "team-8", 2026)
+    expected_order = [team["id"] for team in sorted(TEAMS, key=lambda team: team["draft_order"])]
+
+    assert draft.draft_order == expected_order
+    assert repository.current_team_id(3, draft.draft_order) == "team-4"
+
+    prospect = PlayerRecord(
+        id="prospect-extra",
+        first_name="Draft",
+        last_name="Prospect",
+        position="QB",
+        college_id="alabama",
+        draft_year=2026,
+    )
+    isolate_draft_store.add(prospect)
+    isolate_draft_store.flush()
+    repository.add_pick(draft, "team-1", prospect.id, "USER")
+    assert repository.state(draft)["picks"][0]["player_id"] == prospect.id
+
+
+def test_full_first_round_reaches_late_controlled_team_and_completes(isolate_draft_store: Session) -> None:
+    """A full prospect pool should support user picks at late positions and finish round one."""
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {create_access_token('user-1')}"}
+    draft_id = client.post(
+        "/api/drafts",
+        json={"controlled_team_id": "team-32", "draft_year": 2026},
+        headers=headers,
+    ).json()["draft_run_id"]
+
+    response = client.post(f"/api/drafts/{draft_id}/auto-simulate", headers=headers)
+
+    assert response.status_code == 200
+    state = response.json()
+    assert state["current_team_id"] == "team-32"
+    assert len(state["picks"]) == 31
+    available_player = next(
+        player.id
+        for player in isolate_draft_store.query(PlayerRecord).all()
+        if player.id not in {pick["player_id"] for pick in state["picks"]}
+    )
+
+    response = client.post(
+        f"/api/drafts/{draft_id}/picks",
+        json={"team_id": "team-32", "player_id": available_player},
+        headers=headers,
+    )
+
+    assert response.status_code == 201
+    state = response.json()
+    assert state["draft_run"]["status"] == "completed"
+    assert len(state["picks"]) == 32
+
+
+def test_draft_requires_enough_eligible_prospects(isolate_draft_store: Session) -> None:
+    """A draft must not silently complete before every first-round team can pick."""
+    repository = DraftRepository(isolate_draft_store)
+
+    with pytest.raises(ValueError, match="eligible prospects are required"):
+        repository.create("user-1", "team-1", 2027)
+
+
+def test_auto_simulation_executes_historic_trade_and_stops_for_controlled_team(isolate_draft_store: Session) -> None:
+    """A strong trade-down and trade-up history should change the order before a pick."""
+    observed_at = datetime.now(UTC)
+    isolate_draft_store.add_all([
+        TeamDraftingTendencyRecord(
+            team_id="team-1", draft_year=None, tendency_type="trade_down",
+            preference_score=100, confidence_score=100, sample_size=5,
+            source_name="historical-drafts", rationale="Frequently accumulates extra picks",
+            observed_at=observed_at,
+        ),
+        TeamDraftingTendencyRecord(
+            team_id="team-2", draft_year=None, tendency_type="trade_up",
+            preference_score=100, confidence_score=100, sample_size=4,
+            source_name="historical-drafts", rationale="Frequently consolidates picks",
+            observed_at=observed_at,
+        ),
+    ])
+    isolate_draft_store.commit()
+
+    repository = DraftRepository(isolate_draft_store)
+    draft = repository.create("user-1", "team-2", 2026)
+    repository.auto_simulate(draft)
+
+    state = repository.state(draft)
+    assert state["current_team_id"] == "team-2"
+    assert state["picks"] == []
+    assert state["draft_run"]["draft_order"][:3] == ["team-2", "team-1", "team-3"]
+    assert len(state["draft_run"]["draft_order"]) == len(TEAMS)
+    assert len(state["trades"]) == 1
+    assert state["trades"][0]["moving_up_team_id"] == "team-2"
+    assert state["trades"][0]["moving_down_team_id"] == "team-1"
+    assert state["trades"][0]["value_delta"] > 0
 
 
 def test_draft_state_reports_overall_randomness_setting() -> None:
