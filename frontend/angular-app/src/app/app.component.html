@@ -199,7 +199,13 @@
             <span class="rank">{{ entry.rank | number:'2.0-0' }}</span>
             <div class="prospect" role="button" tabindex="0" [attr.aria-label]="'Inspect ' + entry.name" (keydown.enter)="selectEntry(entry)" (keydown.space)="selectEntry(entry); $event.preventDefault()">
               <strong>{{ entry.name }}</strong>
-              <div class="prospect-meta"><b>{{ entry.position }}</b><span>{{ entry.school }}</span><span *ngIf="entry.projected">Projected</span></div>
+              <div class="prospect-meta">
+                <b>{{ entry.position }}</b>
+                <span class="prospect-school">
+                  <img *ngIf="entry.schoolLogoUrl" class="college-logo" [src]="entry.schoolLogoUrl" alt="" width="24" height="24" loading="lazy" [draggable]="false" (error)="entry.schoolLogoUrl = null">
+                  <span>{{ entry.school }}</span>
+                </span>
+              </div>
             </div>
             <div class="row-signals" aria-label="Prospect signals">
               <span>Need <b>{{ entry.need | number:'1.0-0' }}</b></span>

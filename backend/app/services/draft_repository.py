@@ -14,6 +14,7 @@ from app.services.leadership_tendencies import get_effective_tendencies
 from app.services.ranking_service import select_with_team_randomness
 from app.services.trade_engine import evaluate_trade
 from app.services.prospect_pool import latest_projected_snapshot, pool_filter, snapshot_rankings
+from app.db.college_seed import college_logo_url
 
 TEAM_ORDER = tuple(f"team-{number}" for number in range(1, 33))
 
@@ -210,7 +211,7 @@ class DraftRepository:
     def eligible_players(self, draft: DraftRunRecord) -> list[dict[str, object]]:
         """Return all eligible players for a draft year, independent of team boards."""
         rows = self.session.execute(
-            select(PlayerRecord, CollegeRecord.name, CollegeRecord.abbreviation)
+            select(PlayerRecord, CollegeRecord.name, CollegeRecord.abbreviation, CollegeRecord.logo_url)
             .outerjoin(CollegeRecord, CollegeRecord.id == PlayerRecord.college_id)
             .where(
                 pool_filter(draft.draft_year, draft.prospect_snapshot_id),
@@ -229,11 +230,12 @@ class DraftRepository:
                 "position": player.position,
                 "college_name": college_name,
                 "college_abbreviation": college_abbreviation,
+                "college_logo_url": college_logo_url(player.college_id, logo_url) if logo_url is not None else None,
                 "eligibility_status": player.eligibility_status,
                 "is_projected": player.eligibility_status == "unconfirmed",
                 "source_rank": rankings[player.id].overall_rank if player.id in rankings else None,
             }
-            for player, college_name, college_abbreviation in ordered_rows
+            for player, college_name, college_abbreviation, logo_url in ordered_rows
         ]
 
     @staticmethod

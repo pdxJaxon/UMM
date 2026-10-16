@@ -120,6 +120,13 @@ disclaimer. The draft API's existing `eligible_players` field remains its
 selectable-pool response and now includes eligibility, projected flags, and source
 ranks.
 
+The Big Board shows college logos beside school names. ESPN numeric team IDs
+come from its public college-football team directory; legacy seeded slug-based
+logo URLs are resolved when serving reference, board, and draft-pool responses.
+Custom logo URLs are preserved. If an image cannot load, the school name remains
+visible without a broken-image placeholder. Projection notices remain in the
+page notice and evidence panel rather than repeating on every prospect row.
+
 ## Permissioned 2027 PFF prospect boards
 
 Only collect and import PFF data when your permission covers automated retrieval,

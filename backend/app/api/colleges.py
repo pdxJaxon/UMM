@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.db.models import CollegeRecord
+from app.db.college_seed import college_logo_url
 from app.db.session import get_db
 
 router = APIRouter(prefix="/api/colleges", tags=["colleges"])
@@ -23,7 +24,7 @@ def list_colleges(session: Session = Depends(get_db)) -> list[dict[str, object]]
             "abbreviation": college.abbreviation,
             "conference": college.conference,
             "division": college.division,
-            "logo_url": college.logo_url,
+            "logo_url": college_logo_url(college.id, college.logo_url),
             "official_url": college.official_url,
         }
         for college in colleges
