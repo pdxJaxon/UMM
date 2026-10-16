@@ -22,6 +22,7 @@ from app.db.models import (
     TeamProspectMeetingRecord,
 )
 from app.services.draft_scoring import DraftScoreWeights, calculate_draft_score
+from app.services.draft_order import latest_league_refresh
 from app.services.prospect_pool import latest_projected_snapshot, pool_filter, snapshot_rankings
 
 
@@ -33,6 +34,8 @@ def generate_team_board(
     scoring_weights: DraftScoreWeights | None = None,
     board_type: str = "default",
     user_id: str | None = None,
+    *,
+    commit: bool = True,
 ) -> TeamBoardRecord:
     """Generate and persist a new versioned board for one team."""
     weights = scoring_weights or DraftScoreWeights()
@@ -87,7 +90,10 @@ def generate_team_board(
                 score_breakdown={**breakdown.as_dict(), **candidate.get("source_provenance", {})},
             )
         )
-    session.commit()
+    if commit:
+        session.commit()
+    else:
+        session.flush()
     return board
 
 
@@ -169,9 +175,14 @@ def generate_persisted_team_board(
     session: Session,
     team_id: str,
     draft_year: int,
-    pick_number: int = 1,
+    pick_number: int | None = None,
+    *,
+    commit: bool = True,
 ) -> TeamBoardRecord:
     """Build a team board directly from persisted prospect and team signals."""
+    if pick_number is None:
+        refresh = latest_league_refresh(session, draft_year)
+        pick_number = refresh.manifest["draft_order"].index(team_id) + 1 if refresh is not None else 1
     snapshot = latest_projected_snapshot(session, draft_year)
     snapshot_id = snapshot.id if snapshot is not None else None
     rankings = snapshot_rankings(session, snapshot_id)
@@ -218,7 +229,7 @@ def generate_persisted_team_board(
             "meetings": meetings,
             "pick_number": pick_number,
         })
-    return generate_team_board(session, team_id, draft_year, candidates)
+    return generate_team_board(session, team_id, draft_year, candidates, commit=commit)
 
 
 def _rows(records: list[object]) -> list[dict[str, object]]:

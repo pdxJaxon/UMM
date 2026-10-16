@@ -41,6 +41,91 @@ case-insensitive; equivalent aliases of the same team are not trades.
 Leadership rows accept those same team tokens, a `role` of `gm` or `head_coach`,
 a `person_id`, and a `start_year`.
 
+## Reviewed team needs and projected draft order
+
+The reference seed's alphabetical order is sample data, not an NFL projection.
+New draft runs use a reviewed year-specific order when one exists. This pilot
+supports exactly one first-round pick per team, not traded pick ownership.
+Published order metadata and the draft room distinguish reviewed projections
+from sample/unreviewed order; neither is labeled official.
+
+### Prepare and review the input
+
+Use dated sources for both order and all 32 teams' needs. Record analyst judgments
+as judgments: a numeric need score is a reviewed assessment, not a fact that can
+be inferred directly from a standings table. Verify team identities, ties and
+projection methodology, roster changes, source dates, and the rationale behind
+each position/role assessment. Do not copy a traded-owner draft order into this
+one-pick-per-team projection.
+
+Public starting points include [NFL standings](https://www.nfl.com/standings/)
+and [Tankathon](https://www.tankathon.com/nfl), but these pages are not imported
+automatically and their listing does not certify a current 2027 projection.
+Keep reviewed input manifests locally; never apply fabricated example needs or
+assume that a current web page represents an earlier review date.
+
+From `backend`, print the complete JSON schema:
+
+```powershell
+..\.venv\Scripts\python.exe -m app.jobs.import_league_refresh --schema
+```
+
+The JSON object must contain:
+
+- `draft_year`, `reviewed_on` (`YYYY-MM-DD`), and nonempty `reviewed_by`.
+- `prospect_snapshot_id`: the latest explicitly approved snapshot for that year.
+- `order_basis`: exactly `projected-one-pick-per-team`.
+- `order_source`: `name`, HTTP(S) `url`, and `observed_on`.
+- `draft_order`: exactly 32 unique canonical IDs (`team-1` through `team-32`),
+  arranged in projected pick order.
+- `team_needs`: exactly one object per canonical team, containing `team_id`,
+  `source` (same fields as `order_source`), and a nonempty `needs` list.
+- Each need: canonical `position_code`, `role_level`, `need_score` (0-100),
+  integer `quantity` (1-10), and nonempty `rationale`. Repeated position/role
+  pairs within a team are rejected. Use an explicit zero-score assessment when
+  review finds no need for a listed role; do not invent a need merely to fill a
+  required list.
+
+Sources cannot be dated after review; future review dates, unknown teams or
+positions, incomplete team coverage, and unapproved prospect snapshots fail
+before writes. The importer does not independently verify a source's claims:
+operator review is required.
+
+### Preview, then apply
+
+Back up the database first. For PostgreSQL, apply migrations through
+`023_add_league_data_refreshes.sql`. For SQLite, run the schema-only initializer
+shown in the prospect workflow below; do not reseed an existing database.
+
+```powershell
+..\.venv\Scripts\python.exe -m app.jobs.import_league_refresh --manifest C:\path\to\reviewed-2027.json
+..\.venv\Scripts\python.exe -m app.jobs.import_league_refresh --manifest C:\path\to\reviewed-2027.json --commit
+```
+
+Preview validates and reports without changing records. Apply deactivates
+previous active needs for that draft year (retaining history), adds sourced
+assessments, stores the reviewed manifest under its content hash, and creates 32
+new default-board versions at each team's projected pick position. All changes
+are transactional: generation failure publishes none of that refresh. Reapplying
+identical current input is a no-op. Changed input requires a later review date;
+older refreshes cannot be replayed over newer ones.
+
+Existing personal boards, prospect identities/eligibility, draft picks, and
+pinned draft orders stay unchanged. Other years' needs and order stay separate.
+The original team seed order is not overwritten. Regeneration does not update
+personal copies.
+
+### Complete the full refresh deliberately
+
+After importing, verify the projected order and active needs through
+`GET /api/teams?draft_year=2027` and each team's needs endpoint. Review the new
+default boards, then exercise a complete first round in an isolated database.
+Only after prospects, team needs, order, and generated outputs have all been
+reviewed should you record `DATA_UPDATED_ON` and restart the API.
+
+The import never advances the homepage's full-refresh date automatically.
+Projection status is not a claim that the eventual NFL order is known.
+
 ## Consensus CSV imports and projected pools
 
 Importing rankings and approving them for simulation are separate operations.

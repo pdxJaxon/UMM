@@ -19,27 +19,33 @@ from app.db.models import (
 from app.db.session import get_db
 from app.db.college_seed import college_logo_url
 from app.services.team_board_service import copy_board_for_user, generate_persisted_team_board, get_latest_board, get_latest_team_board, reorder_personal_board
+from app.services.draft_order import draft_order_for_year, latest_league_refresh
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
 
 
 @router.get("")
-def list_teams(session: Session = Depends(get_db)) -> list[dict[str, object]]:
+def list_teams(draft_year: int = 2027, session: Session = Depends(get_db)) -> list[dict[str, object]]:
     """Return NFL teams ordered by their configured draft-order value."""
     teams = session.scalars(select(TeamRecord).order_by(TeamRecord.draft_order)).all()
+    order = draft_order_for_year(session, draft_year)
+    positions = {team_id: index for index, team_id in enumerate(order, 1)}
+    refresh = latest_league_refresh(session, draft_year)
     return [
         {
             "id": team.id,
             "name": team.name,
             "city": team.city,
             "abbreviation": team.abbreviation,
-            "draft_order": team.draft_order,
+            "draft_order": positions[team.id],
+            "draft_order_basis": "projected-one-pick-per-team" if refresh else "seeded-sample",
+            "draft_order_reviewed_on": refresh.reviewed_on.date().isoformat() if refresh else None,
             "randomness_score": float(team.randomness_score),
             "logo_url": team.logo_url,
             "helmet_url": team.helmet_url,
             "official_url": team.official_url,
         }
-        for team in teams
+        for team in sorted(teams, key=lambda team: positions[team.id])
     ]
 
 

@@ -106,3 +106,18 @@ test('empty available pool has an explicit state and makes no provider request',
   assert.match(component.recommendationError, /No available prospects/);
   assert.equal(requests.length, 0);
 });
+
+test('reviewed projections are labeled honestly and existing draft basis stays pinned', () => {
+  const { component } = setup();
+  component.selectedTeamId = 'team-1';
+  component.teams = [{ id: 'team-1', draft_order_basis: 'projected-one-pick-per-team' }];
+  component.draftState.draft_run.order_basis = 'legacy-unreviewed';
+  assert.match(component.draftOrderLabel, /Sample\/unreviewed/);
+  component.draftState.draft_run.order_basis = 'projected-one-pick-per-team';
+  assert.match(component.draftOrderLabel, /Projected draft order/);
+  assert.match(component.draftOrderLabel, /traded ownership is not modeled/);
+  component.draftState = null;
+  assert.match(component.draftOrderLabel, /Projected draft order/);
+  component.teams[0].draft_order_basis = 'seeded-sample';
+  assert.match(component.draftOrderLabel, /not the official NFL order/);
+});
