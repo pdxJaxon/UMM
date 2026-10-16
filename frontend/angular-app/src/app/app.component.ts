@@ -41,6 +41,7 @@ interface BoardEntry {
   name: string;
   position: string;
   school: string;
+  schoolLogoUrl: string | null;
   score: number;
   need: number;
   fit: number;
@@ -60,6 +61,7 @@ interface TeamBoardEntryPayload {
   position?: string | null;
   college_name?: string | null;
   college_abbreviation?: string | null;
+  college_logo_url?: string | null;
   is_projected?: boolean;
   source_rank?: number | null;
   source_name?: string | null;
@@ -87,6 +89,7 @@ interface DraftPlayerPayload {
   position: string;
   college_name: string | null;
   college_abbreviation: string | null;
+  college_logo_url?: string | null;
   is_projected?: boolean;
   source_rank?: number | null;
 }
@@ -755,6 +758,7 @@ this.activeEntry = null;
         name,
         position: entry.position ?? 'N/A',
         school: entry.college_name ?? entry.college_abbreviation ?? 'N/A',
+        schoolLogoUrl: entry.college_logo_url || null,
         score: Number(entry.score ?? 0),
         need: needValue,
         fit: fitValue,
@@ -783,6 +787,7 @@ this.activeEntry = null;
         name: [player.first_name, player.last_name].filter(Boolean).join(' ') || 'Unknown prospect',
         position: player.position || 'N/A',
         school: player.college_name ?? player.college_abbreviation ?? 'N/A',
+        schoolLogoUrl: player.college_logo_url || null,
         score: 0,
         need: 0,
         fit: 0,

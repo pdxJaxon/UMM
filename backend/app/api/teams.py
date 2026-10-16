@@ -17,6 +17,7 @@ from app.db.models import (
     UserRecord,
 )
 from app.db.session import get_db
+from app.db.college_seed import college_logo_url
 from app.services.team_board_service import copy_board_for_user, generate_persisted_team_board, get_latest_board, get_latest_team_board, reorder_personal_board
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
@@ -190,6 +191,7 @@ def get_team_board(
                 "college_id": player.college_id if player else None,
                 "college_name": college.name if college else None,
                 "college_abbreviation": college.abbreviation if college else None,
+                "college_logo_url": college_logo_url(college.id, college.logo_url) if college else None,
                 "eligibility_status": player.eligibility_status if player else None,
                 "is_projected": player.eligibility_status == "unconfirmed" if player else False,
                 "source_rank": entry.score_breakdown.get("source_rank"),

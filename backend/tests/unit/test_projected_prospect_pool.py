@@ -224,6 +224,7 @@ def test_full_round_api_uses_approved_projected_players_and_rejects_duplicates(s
             assert len(players) == 150
             assert all(player["is_projected"] for player in players)
             assert players[0]["source_rank"] == 1
+            assert players[0]["college_logo_url"].endswith(".png")
             draft_id = start.json()["draft_run_id"]
             simulated = client.post(f"/api/drafts/{draft_id}/auto-simulate", headers=headers)
             assert simulated.status_code == 200, simulated.text
