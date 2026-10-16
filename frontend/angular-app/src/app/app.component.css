@@ -786,6 +786,12 @@ label,
   letter-spacing: .05em;
 }
 
+.college-logo {
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+}
+
 .row-signals {
   display: grid;
   gap: 4px;
