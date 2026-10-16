@@ -16,7 +16,7 @@
 
 .topbar {
   display: flex;
-  height: 84px;
+  height: 92px;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid #d7dfdb;
@@ -27,14 +27,14 @@
   position: relative;
   gap: 12px;
   align-items: center;
-  font-size: 20px;
+  font-size: 24px;
   font-weight: 800;
 }
 
 .brand small {
   position: absolute;
-  top: 29px;
-  left: 48px;
+  top: 34px;
+  left: 56px;
   color: #65716e;
   font: 700 9px "Courier New", monospace;
   letter-spacing: .12em;
@@ -42,10 +42,10 @@
 }
 
 .brand-mark {
-  padding: 8px 7px;
+  padding: 10px 8px;
   color: #fff;
   background: var(--team-primary);
-  font-size: 13px;
+  font-size: 16px;
 }
 
 .season,
@@ -124,6 +124,10 @@ label,
 .season,
 .status {
   color: #65716e;
+}
+
+.season {
+  font-size: 15px;
 }
 
 .season-label {
@@ -389,15 +393,15 @@ label,
 .team-identity {
   display: flex;
   flex-basis: 100%;
-  gap: 14px;
+  gap: 18px;
   align-items: center;
 }
 
 .team-logo-wrap {
   display: grid;
-  width: 86px;
-  height: 86px;
-  flex: 0 0 86px;
+  width: 100px;
+  height: 100px;
+  flex: 0 0 100px;
   place-items: center;
   border: 1px solid color-mix(in srgb, var(--team-primary) 35%, transparent);
   background: color-mix(in srgb, var(--team-secondary) 14%, #fff);
@@ -405,8 +409,8 @@ label,
 }
 
 .team-logo {
-  width: 68px;
-  height: 68px;
+  width: 80px;
+  height: 80px;
   object-fit: contain;
 }
 
@@ -423,11 +427,12 @@ label,
 
 .team-identity .eyebrow {
   margin-bottom: 5px;
+  font-size: 14px;
 }
 
 .team-caption {
   color: #65716e;
-  font-size: 13px;
+  font-size: 15px;
 }
 
 .eyebrow {
@@ -717,7 +722,7 @@ label,
 
 .board-row {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 74px 28px 28px;
+  grid-template-columns: 42px minmax(0, 1fr) 74px max-content 28px;
   gap: 12px;
   align-items: center;
   padding: 18px 20px;
@@ -728,6 +733,14 @@ label,
 .board-row:hover,
 .board-row.selected {
   background: color-mix(in srgb, var(--team-secondary) 9%, #f8faf8);
+}
+
+.board-row.reorderable {
+  cursor: grab;
+}
+
+.board-row.reorderable:active {
+  cursor: grabbing;
 }
 
 .rank {
@@ -790,6 +803,11 @@ label,
   height: 28px;
   border: 0;
   background: #e9efeb;
+}
+
+.move-controls {
+  display: grid;
+  gap: 4px;
 }
 
 .move:disabled {
@@ -890,7 +908,7 @@ label,
   }
 
   .topbar {
-    height: 70px;
+    height: 78px;
   }
 
   .account-bar,
@@ -945,14 +963,27 @@ label,
   }
 
   .team-logo-wrap {
-    width: 68px;
-    height: 68px;
-    flex-basis: 68px;
+    width: 80px;
+    height: 80px;
+    flex-basis: 80px;
   }
 
   .team-logo {
-    width: 54px;
-    height: 54px;
+    width: 66px;
+    height: 66px;
+  }
+
+  .brand {
+    font-size: 21px;
+  }
+
+  .brand-mark {
+    padding: 8px 7px;
+    font-size: 14px;
+  }
+
+  .season {
+    font-size: 12px;
   }
 
   .brand small {
@@ -1028,7 +1059,7 @@ label,
   }
 
   .board-row {
-    grid-template-columns: 30px minmax(0, 1fr) 62px 25px 25px;
+    grid-template-columns: 30px minmax(0, 1fr) 62px 25px;
     padding: 16px 12px;
   }
 
@@ -1038,5 +1069,10 @@ label,
 
   .prospect strong {
     font-size: 15px;
+  }
+
+  .move {
+    width: 25px;
+    height: 25px;
   }
 }
