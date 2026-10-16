@@ -107,6 +107,7 @@ def initialize_schema() -> None:
                 "head_coach_name": "VARCHAR(150)",
             },
             "draft_runs": {
+                "prospect_snapshot_id": "VARCHAR(64) REFERENCES prospect_board_snapshots(id)",
                 "randomness_overrides": "JSON NOT NULL DEFAULT '{}'",
                 "overall_randomness": "NUMERIC(5, 2) NOT NULL DEFAULT 50",
                 "draft_order": "JSON NOT NULL DEFAULT '[]'",
@@ -118,6 +119,9 @@ def initialize_schema() -> None:
             "prospect_source_identities": {
                 "reviewed_name": "VARCHAR(200)",
                 "reviewed_school": "VARCHAR(100)",
+            },
+            "prospect_board_snapshots": {
+                "projected_pool_approved_at": "DATETIME",
             },
         }
         with engine.begin() as connection:

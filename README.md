@@ -28,7 +28,10 @@ Pop-Location
 Open two PowerShell windows. Each command block below first switches to the
 correct folder, regardless of where your terminal starts.
 
-In the first window, start the API and initialize the local database:
+In the first window, initialize a new local database and start the API. The
+initializer also seeds reference data; for an existing database, use the
+schema-only upgrade in the [prospect import workflow](data/README.md#consensus-csv-imports-and-projected-pools)
+instead of rerunning the initializer:
 
 ```powershell
 Set-Location "C:\Users\s008919\git\UMM\backend"
@@ -54,3 +57,8 @@ Open the site at <http://localhost:4201>. The API health check is at
 The local database uses SQLite by default and is stored in
 `backend\umockme.db`. No separate database server is needed for the default
 local setup.
+
+To load a consensus CSV and explicitly approve projected prospects, follow the
+[import and approval workflow](data/README.md#consensus-csv-imports-and-projected-pools).
+Imports preserve personal boards; approval allows simulation without certifying
+draft eligibility.

@@ -315,6 +315,7 @@ class ProspectBoardSnapshotRecord(Base):
     collection_method = Column(String(200), nullable=False)
     scope = Column(Text, nullable=False)
     prospect_count = Column(Integer, nullable=False)
+    projected_pool_approved_at = Column(DateTime, nullable=True)
 
 
 class ProspectBoardRankingRecord(Base):
@@ -404,6 +405,7 @@ class DraftRunRecord(Base):
     user_id = Column(String(64), ForeignKey("users.id"), index=True, nullable=False)
     controlled_team_id = Column(String(64), ForeignKey("teams.id"), nullable=False)
     draft_year = Column(Integer, nullable=False)
+    prospect_snapshot_id = Column(String(64), ForeignKey("prospect_board_snapshots.id"), nullable=True)
     status = Column(String(20), default="drafting", nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(UTC), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(UTC), onupdate=lambda: datetime.now(UTC), nullable=False)

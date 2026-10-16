@@ -41,6 +41,85 @@ case-insensitive; equivalent aliases of the same team are not trades.
 Leadership rows accept those same team tokens, a `role` of `gm` or `head_coach`,
 a `person_id`, and a `start_year`.
 
+## Consensus CSV imports and projected pools
+
+Importing rankings and approving them for simulation are separate operations.
+Only members of an explicitly approved snapshot become available as projected
+prospects. Approval does not confirm eligibility or declaration.
+
+Before updating an existing database, take a backup. For PostgreSQL, apply
+migrations through `022_add_projected_prospect_pool.sql` using the deployment
+migration process. For local SQLite, run the schema-only upgrade from `backend`
+to preserve existing reference data:
+
+```powershell
+Set-Location C:\Users\s008919\git\UMM\backend
+..\.venv\Scripts\python.exe -c "from app.db.initialize import initialize_schema; initialize_schema()"
+```
+
+The CSV must have `Rank,Player Name,Position,College` headers, unique consecutive
+ranks starting at 1, and unique name/school identities. The adapter maps `DL` to
+`DT` while retaining the source position. Keep source files in the ignored
+`data\prospects` directory.
+
+Preview the selected top 150, then import them:
+
+```powershell
+..\.venv\Scripts\python.exe -m app.jobs.import_consensus_csv --csv ..\data\prospects\consensus-big-board-2027-20261015.csv --draft-year 2027 --snapshot-date 2026-10-15 --limit 150
+..\.venv\Scripts\python.exe -m app.jobs.import_consensus_csv --csv ..\data\prospects\consensus-big-board-2027-20261015.csv --draft-year 2027 --snapshot-date 2026-10-15 --limit 150 --commit
+```
+
+The report returns a `snapshot_id`. Use that exact ID to preview approval, then
+approve and generate fresh default boards for all teams:
+
+```powershell
+..\.venv\Scripts\python.exe -m app.jobs.approve_projected_pool --snapshot-id <snapshot_id>
+..\.venv\Scripts\python.exe -m app.jobs.approve_projected_pool --snapshot-id <snapshot_id> --commit --generate-boards
+```
+
+Both CLIs default to dry-run. Approval is committed before board generation;
+each default board is committed independently. A generation error is reported
+explicitly and may leave some new default versions already created. After fixing
+the error, rerunning preserves approval and creates additional default versions.
+
+### Identity, eligibility, and existing boards
+
+- Imports reuse stable prospect IDs and append dated rankings. Existing profiles,
+  eligibility, draft references, and personal board entries/order are preserved.
+  Prospects missing from a later CSV are reported, not deleted.
+- New players remain `unconfirmed`. Ambiguous identities, unexpected school
+  changes, and year conflicts require review rather than automatic reassignment.
+- Each new snapshot needs explicit approval. New drafts and generated defaults
+  use the latest approved snapshot by collection date for their draft year.
+- An approved pool contains only that snapshot's members whose status is
+  `eligible` or `unconfirmed`; withdrawn and other blocked statuses remain
+  unavailable. Nonmembers, including legacy samples, stay stored but are excluded.
+- A draft pins its snapshot when created. Later approvals/default-board versions
+  do not replace that pool or its source rankings. Eligibility changes can still
+  make a pinned prospect unavailable. Without a pinned snapshot, legacy drafts
+  retain their confirmed-eligible-only policy.
+- Board regeneration creates new default versions; it never refreshes or
+  reorders personal copies. Preserved personal entries outside a draft's pool
+  cannot be selected in that draft.
+
+### Source ranks versus UMM scores
+
+Consensus rank is displayed separately from the team-adjusted UMM score. When
+stored evaluation signals exist, they take precedence. Otherwise, an approved
+snapshot supplies a transparent fallback evaluation:
+
+```text
+source evaluation = 100 * (snapshot prospect count - source rank + 1) / snapshot prospect count
+```
+
+The existing concern penalty and team-weighted scoring still apply. This
+percentile is not an athletic measurement, scouting grade, or PFF grade.
+Generated entries record the source snapshot, rank, normalized evaluation, and
+evaluation basis in their score breakdown. Projected entries show an eligibility
+disclaimer. The draft API's existing `eligible_players` field remains its
+selectable-pool response and now includes eligibility, projected flags, and source
+ranks.
+
 ## Permissioned 2027 PFF prospect boards
 
 Only collect and import PFF data when your permission covers automated retrieval,

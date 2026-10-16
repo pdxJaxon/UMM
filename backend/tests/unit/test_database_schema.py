@@ -167,10 +167,10 @@ def test_initialize_schema_upgrades_previous_sqlite_schema(monkeypatch) -> None:
         ).scalar_one() == "position"
         assert connection.execute(
             text(
-                "SELECT overall_randomness, randomness_overrides, draft_order "
+                "SELECT overall_randomness, randomness_overrides, draft_order, prospect_snapshot_id "
                 "FROM draft_runs WHERE id = 'run-1'"
             )
-        ).one() == (50, "{}", "[]")
+        ).one() == (50, "{}", "[]", None)
         assert connection.execute(
             text(
                 "SELECT randomness_factor, prediction_metadata "
@@ -188,9 +188,10 @@ def test_initialize_schema_upgrades_previous_sqlite_schema(monkeypatch) -> None:
             "head_coach_id",
             "head_coach_name",
         },
-        "draft_runs": {"randomness_overrides", "overall_randomness", "draft_order"},
+        "draft_runs": {"randomness_overrides", "overall_randomness", "draft_order", "prospect_snapshot_id"},
         "draft_picks": {"randomness_factor", "prediction_metadata"},
         "prospect_source_identities": {"reviewed_name", "reviewed_school"},
+        "prospect_board_snapshots": {"projected_pool_approved_at"},
     }
     inspector = inspect(engine)
     for table_name, expected in expected_columns.items():
