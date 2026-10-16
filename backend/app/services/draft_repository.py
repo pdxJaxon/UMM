@@ -13,6 +13,8 @@ from app.services.llm_prediction import OpenAICompatiblePredictionProvider, Pred
 from app.services.leadership_tendencies import get_effective_tendencies
 from app.services.ranking_service import select_with_team_randomness
 from app.services.trade_engine import evaluate_trade
+from app.services.prospect_pool import latest_projected_snapshot, pool_filter, snapshot_rankings
+from app.db.college_seed import college_logo_url
 
 TEAM_ORDER = tuple(f"team-{number}" for number in range(1, 33))
 
@@ -46,18 +48,20 @@ class DraftRepository:
         team_order = [team.id for team in self.session.scalars(select(TeamRecord).order_by(TeamRecord.draft_order))]
         if controlled_team_id not in team_order:
             raise ValueError("Controlled team does not have a draft position")
+        snapshot = latest_projected_snapshot(self.session, draft_year)
+        snapshot_id = snapshot.id if snapshot is not None else None
         eligible_prospects = self.session.scalar(
             select(func.count()).select_from(PlayerRecord).where(
-                PlayerRecord.draft_year == draft_year,
-                PlayerRecord.eligibility_status == "eligible",
+                pool_filter(draft_year, snapshot_id),
             )
         ) or 0
         if eligible_prospects < len(team_order):
-            raise ValueError(f"At least {len(team_order)} eligible prospects are required for a first-round draft")
+            raise ValueError(f"At least {len(team_order)} eligible prospects are required for a first-round draft (confirmed or approved projected)")
         draft = DraftRunRecord(
             id=self._next_id("draft"), user_id=user_id, controlled_team_id=controlled_team_id,
             draft_year=draft_year, status="drafting", overall_randomness=overall_randomness,
             randomness_overrides=overrides, draft_order=team_order,
+            prospect_snapshot_id=snapshot_id,
         )
         self.session.add(draft)
         self.session.flush()
@@ -88,7 +92,9 @@ class DraftRepository:
             raise ValueError("Player does not exist")
         if player.draft_year != draft.draft_year:
             raise ValueError("Player is not part of this draft year")
-        if player.eligibility_status != "eligible":
+        if self.session.scalar(select(PlayerRecord.id).where(
+            PlayerRecord.id == player_id, pool_filter(draft.draft_year, draft.prospect_snapshot_id),
+        )) is None:
             raise ValueError("Player is not eligible for this draft")
         if any(pick.player_id == player_id for pick in picks):
             raise ValueError("Player has already been selected")
@@ -120,18 +126,12 @@ class DraftRepository:
                 break
             remaining = self._available_board_candidates(draft, team_id, selected)
             if not remaining:
-                remaining = list(self.session.scalars(
-                    select(PlayerRecord.id)
-                    .where(
-                        PlayerRecord.draft_year == draft.draft_year,
-                        PlayerRecord.eligibility_status == "eligible",
-                        PlayerRecord.id.not_in(selected),
-                    )
-                    .order_by(PlayerRecord.id)
-                ))
+                remaining = [
+                    player["player_id"] for player in self.eligible_players(draft)
+                    if player["player_id"] not in selected
+                ]
             if not remaining:
-                draft.status = "completed"
-                break
+                raise ValueError("No available prospects remain before the first round is complete")
             team = self.session.get(TeamRecord, team_id)
             baseline = float(team.randomness_score or 0) if team else 50.0
             randomness = self._effective_randomness(
@@ -147,7 +147,7 @@ class DraftRepository:
                         team_name=team.name if team else team_id,
                         draft_year=draft.draft_year,
                         pick_number=len(picks) + 1,
-                        candidates=tuple(self._candidate_context(remaining)),
+                        candidates=tuple(self._candidate_context(remaining, draft)),
                         team_needs=tuple(self._team_needs(team_id, draft.draft_year)),
                         team_tendencies=tuple(self._cached_team_tendencies(team_id, draft.draft_year, tendency_cache)),
                         overall_randomness=float(draft.overall_randomness),
@@ -185,6 +185,7 @@ class DraftRepository:
                 "overall_randomness": float(draft.overall_randomness),
                 "randomness_overrides": draft.randomness_overrides,
                 "draft_order": self._draft_order(draft),
+                "prospect_snapshot_id": draft.prospect_snapshot_id,
             },
             "current_pick_number": len(picks) + 1,
             "current_team_id": self.current_team_id(len(picks), self._draft_order(draft)),
@@ -210,14 +211,17 @@ class DraftRepository:
     def eligible_players(self, draft: DraftRunRecord) -> list[dict[str, object]]:
         """Return all eligible players for a draft year, independent of team boards."""
         rows = self.session.execute(
-            select(PlayerRecord, CollegeRecord.name, CollegeRecord.abbreviation)
+            select(PlayerRecord, CollegeRecord.name, CollegeRecord.abbreviation, CollegeRecord.logo_url)
             .outerjoin(CollegeRecord, CollegeRecord.id == PlayerRecord.college_id)
             .where(
-                PlayerRecord.draft_year == draft.draft_year,
-                PlayerRecord.eligibility_status == "eligible",
+                pool_filter(draft.draft_year, draft.prospect_snapshot_id),
             )
             .order_by(PlayerRecord.id)
         ).all()
+        rankings = snapshot_rankings(self.session, draft.prospect_snapshot_id)
+        ordered_rows = sorted(rows, key=lambda row: (
+            rankings[row[0].id].overall_rank if row[0].id in rankings else float("inf"), row[0].id,
+        ))
         return [
             {
                 "player_id": player.id,
@@ -226,8 +230,12 @@ class DraftRepository:
                 "position": player.position,
                 "college_name": college_name,
                 "college_abbreviation": college_abbreviation,
+                "college_logo_url": college_logo_url(player.college_id, logo_url) if logo_url is not None else None,
+                "eligibility_status": player.eligibility_status,
+                "is_projected": player.eligibility_status == "unconfirmed",
+                "source_rank": rankings[player.id].overall_rank if player.id in rankings else None,
             }
-            for player, college_name, college_abbreviation in rows
+            for player, college_name, college_abbreviation, logo_url in ordered_rows
         ]
 
     @staticmethod
@@ -311,25 +319,36 @@ class DraftRepository:
             return []
         entries = self.session.scalars(
             select(TeamBoardEntryRecord)
+            .join(PlayerRecord, PlayerRecord.id == TeamBoardEntryRecord.player_id)
             .where(
                 TeamBoardEntryRecord.board_id == board.id,
                 TeamBoardEntryRecord.is_active.is_(True),
+                pool_filter(draft.draft_year, draft.prospect_snapshot_id),
             )
             .order_by(TeamBoardEntryRecord.rank_position)
         ).all()
-        return [entry.player_id for entry in entries if entry.player_id not in selected]
+        return [
+            entry.player_id for entry in entries
+            if entry.player_id not in selected and (
+                draft.prospect_snapshot_id is None
+                or entry.score_breakdown.get("source_snapshot_id") == draft.prospect_snapshot_id
+            )
+        ]
 
     def _next_id(self, prefix: str) -> str:
         """Generate a collision-resistant identifier within the current database."""
         return f"{prefix}-{self.session.query(DraftRunRecord).count() + 1}"
 
-    def _candidate_context(self, player_ids: list[str]) -> list[dict[str, object]]:
+    def _candidate_context(self, player_ids: list[str], draft: DraftRunRecord) -> list[dict[str, object]]:
         """Build compact, source-backed candidate context for the model."""
+        rankings = snapshot_rankings(self.session, draft.prospect_snapshot_id)
         return [
             {
                 "player_id": player_id,
                 "position": player.position,
                 "college_id": player.college_id,
+                "source_rank": rankings[player_id].overall_rank if player_id in rankings else None,
+                "is_projected": player.eligibility_status == "unconfirmed",
             }
             for player_id in player_ids
             if (player := self.session.get(PlayerRecord, player_id)) is not None

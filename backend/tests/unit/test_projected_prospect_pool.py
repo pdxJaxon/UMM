@@ -1,0 +1,271 @@
+"""Approval, board scoring, and complete first-round projected-pool regressions."""
+
+from datetime import date, datetime, UTC
+import json
+
+from fastapi.testclient import TestClient
+import pytest
+from sqlalchemy import create_engine, event, select
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
+
+from app.core.security import create_access_token
+from app.db.initialize import seed_reference_data
+from app.db.models import (
+    DraftRunRecord, PlayerAthleticScoreRecord, PlayerRecord, ProspectBoardSnapshotRecord,
+    TeamBoardEntryRecord, TeamBoardRecord, UserRecord,
+)
+from app.db.session import Base, get_db
+from app.main import app
+from app.services.consensus_csv import read_consensus_csv
+from app.services.draft_repository import DraftRepository
+from app.services.prospect_board_import import import_board_snapshot
+from app.services.prospect_pool import approve_projected_snapshot, pool_filter
+from app.services.team_board_service import (
+    copy_board_for_user, generate_persisted_team_board, reorder_personal_board,
+)
+
+
+@pytest.fixture
+def session(monkeypatch):
+    from dataclasses import replace
+    from app.services import draft_repository
+
+    monkeypatch.setattr(draft_repository, "settings", replace(draft_repository.settings, llm_api_key=""))
+    engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
+
+    @event.listens_for(engine, "connect")
+    def enforce_foreign_keys(connection, _record):
+        connection.execute("PRAGMA foreign_keys=ON")
+
+    Base.metadata.create_all(engine)
+    with Session(engine) as db:
+        seed_reference_data(db)
+        db.add(UserRecord(
+            id="user", email="pool@example.com", password_hash="not-a-real-password",
+            first_name="Pool", last_name="Tester",
+        ))
+        db.commit()
+        yield db
+    engine.dispose()
+
+
+def _import(session, tmp_path, *, day=15, prefix="Prospect", count=40):
+    path = tmp_path / f"{prefix}-{day}.csv"
+    path.write_text("Rank,Player Name,Position,College\n" + "".join(
+        f"{rank},{prefix} Number{rank},WR,Alabama\n" for rank in range(1, count + 1)
+    ), encoding="utf-8")
+    snapshot = read_consensus_csv(path, draft_year=2027, snapshot_date=date(2026, 10, day))
+    return import_board_snapshot(session, snapshot, commit=True)
+
+
+def _ids(session, snapshot_id):
+    return set(session.scalars(select(PlayerRecord.id).where(pool_filter(2027, snapshot_id))))
+
+
+def test_import_does_not_approve_and_approval_does_not_change_eligibility(session, tmp_path):
+    report = _import(session, tmp_path)
+    assert _ids(session, report["snapshot_id"]) == set()
+    with pytest.raises(ValueError, match="At least 32"):
+        DraftRepository(session).create("user", "team-32", 2027)
+    snapshot = approve_projected_snapshot(session, report["snapshot_id"])
+    approved_at = snapshot.projected_pool_approved_at
+    session.commit()
+    approve_projected_snapshot(session, snapshot.id)
+    assert snapshot.projected_pool_approved_at == approved_at
+    assert len(_ids(session, snapshot.id)) == 40
+    assert {player.eligibility_status for player in session.scalars(select(PlayerRecord))} == {"unconfirmed"}
+    assert _ids(session, None) == set()
+    assert session.query(TeamBoardRecord).count() == 0
+    with pytest.raises(ValueError, match="does not exist"):
+        approve_projected_snapshot(session, "missing")
+
+
+def test_drafts_pin_approved_snapshot_and_exclude_unapproved_or_withdrawn_players(session, tmp_path):
+    first = _import(session, tmp_path)
+    approve_projected_snapshot(session, first["snapshot_id"])
+    session.commit()
+    repository = DraftRepository(session)
+    draft = repository.create(
+        "user", "team-32", 2027,
+        randomness_overrides={f"team-{number}": 0 for number in range(1, 33)},
+        overall_randomness=0,
+    )
+    old_ids = {entry["player_id"] for entry in first["identities"]}
+    newer = _import(session, tmp_path, day=16, prefix="Different")
+    assert {player["player_id"] for player in repository.eligible_players(draft)} == old_ids
+    approve_projected_snapshot(session, newer["snapshot_id"])
+    session.commit()
+    generate_persisted_team_board(session, "team-1", 2027)
+    fresh = repository.create("user", "team-32", 2027)
+    assert fresh.prospect_snapshot_id == newer["snapshot_id"]
+    assert draft.prospect_snapshot_id == first["snapshot_id"]
+    assert {player["player_id"] for player in repository.eligible_players(draft)} == old_ids
+    with pytest.raises(ValueError, match="not eligible"):
+        repository.add_pick(draft, "team-1", newer["identities"][0]["player_id"], "USER")
+    withdrawn = session.get(PlayerRecord, first["identities"][0]["player_id"])
+    withdrawn.eligibility_status = "withdrawn"
+    session.flush()
+    with pytest.raises(ValueError, match="not eligible"):
+        repository.add_pick(draft, "team-1", withdrawn.id, "USER")
+    repository.auto_simulate(draft)
+    pinned_picks = repository.state(draft)["picks"]
+    assert len(pinned_picks) == 31
+    assert pinned_picks[0]["player_id"] == first["identities"][1]["player_id"]
+    assert {pick["player_id"] for pick in pinned_picks} <= old_ids
+    old_draft = DraftRunRecord(id="legacy", user_id="user", controlled_team_id="team-1", draft_year=2027)
+    session.add(old_draft)
+    session.flush()
+    assert repository.eligible_players(old_draft) == []
+
+
+def test_confirmed_players_outside_snapshot_remain_only_in_legacy_pool(session, tmp_path):
+    report = _import(session, tmp_path)
+    session.add(PlayerRecord(
+        id="legacy-sample", first_name="Legacy", last_name="Sample", position="ATH",
+        college_id="alabama", draft_year=2027, eligibility_status="eligible",
+    ))
+    session.commit()
+    approve_projected_snapshot(session, report["snapshot_id"])
+    session.commit()
+    assert "legacy-sample" not in _ids(session, report["snapshot_id"])
+    assert _ids(session, None) == {"legacy-sample"}
+
+
+def test_source_rank_scores_are_auditable_and_custom_boards_survive_refresh(session, tmp_path):
+    first = _import(session, tmp_path)
+    approve_projected_snapshot(session, first["snapshot_id"])
+    session.commit()
+    default = generate_persisted_team_board(session, "team-1", 2027)
+    assert len(default.entries) == 40
+    ranked = sorted(default.entries, key=lambda entry: entry.rank_position)
+    assert ranked[0].player_id == first["identities"][0]["player_id"]
+    assert ranked[-1].player_id == first["identities"][-1]["player_id"]
+    assert ranked[0].score_breakdown["source_rank"] == 1
+    assert ranked[0].score_breakdown["source_evaluation"] == 100.0
+    assert ranked[0].score_breakdown["evaluation_basis"] == "source_rank_percentile"
+    assert ranked[0].score_breakdown["player_evaluation"] == 100.0
+    assert ranked[0].score != 1
+    personal = copy_board_for_user(session, default, "user")
+    order = [entry.player_id for entry in reversed(ranked)]
+    reorder_personal_board(session, personal, order)
+    before = [(entry.id, entry.player_id, entry.rank_position, entry.score) for entry in personal.entries]
+    newer = _import(session, tmp_path, day=16, count=32)
+    approve_projected_snapshot(session, newer["snapshot_id"])
+    session.commit()
+    generate_persisted_team_board(session, "team-1", 2027)
+    session.expire_all()
+    assert [(entry.id, entry.player_id, entry.rank_position, entry.score) for entry in personal.entries] == before
+    assert session.get(PlayerRecord, order[0]) is not None
+    assert len(newer["missing_from_previous_snapshot"]) == 8
+    assert session.query(PlayerAthleticScoreRecord).count() == 0
+
+
+def test_source_rank_fallback_does_not_replace_existing_evaluation_signals(session, tmp_path):
+    report = _import(session, tmp_path)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    session.add(PlayerAthleticScoreRecord(
+        player_id=report["identities"][0]["player_id"], source_name="test",
+        observed_at=datetime.now(UTC), metric_name="pff_grade", score=75, score_scale="100",
+    ))
+    session.commit()
+    board = generate_persisted_team_board(session, "team-1", 2027)
+    entry = next(entry for entry in board.entries if entry.player_id == report["identities"][0]["player_id"])
+    assert entry.score_breakdown["evaluation_basis"] == "stored_signals"
+    assert entry.score_breakdown["player_evaluation"] == 75
+    assert entry.score_breakdown["source_evaluation"] == 100
+
+
+def test_pool_exhaustion_does_not_report_a_successful_completed_round(session, tmp_path):
+    report = _import(session, tmp_path)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    session.commit()
+    repository = DraftRepository(session)
+    draft = repository.create("user", "team-32", 2027)
+    for player in session.scalars(select(PlayerRecord)):
+        player.eligibility_status = "withdrawn"
+    session.flush()
+    with pytest.raises(ValueError, match="before the first round is complete"):
+        repository.auto_simulate(draft)
+    assert draft.status == "drafting"
+
+
+def test_full_round_api_uses_approved_projected_players_and_rejects_duplicates(session, tmp_path):
+    report = _import(session, tmp_path, count=150)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    session.commit()
+    stale = TeamBoardRecord(
+        team_id="team-1", draft_year=2027, board_type="default", version=1,
+        generated_at=datetime.now(UTC), scoring_version="stale",
+    )
+    session.add(stale)
+    excluded = PlayerRecord(
+        id="unreviewed", first_name="Not", last_name="Approved", position="QB",
+        college_id="alabama", draft_year=2027, eligibility_status="unconfirmed",
+    )
+    session.add(excluded)
+    session.flush()
+    session.add(TeamBoardEntryRecord(board_id=stale.id, player_id=excluded.id, rank_position=1, score=100))
+    session.commit()
+
+    def override_db():
+        yield session
+
+    app.dependency_overrides[get_db] = override_db
+    headers = {"Authorization": f"Bearer {create_access_token('user')}"}
+    try:
+        with TestClient(app) as client:
+            start = client.post("/api/drafts", json={
+                "controlled_team_id": "team-32", "draft_year": 2027, "overall_randomness": 0,
+                "randomness_overrides": {f"team-{number}": 0 for number in range(1, 33)},
+            }, headers=headers)
+            assert start.status_code == 201, start.text
+            players = start.json()["eligible_players"]
+            assert len(players) == 150
+            assert all(player["is_projected"] for player in players)
+            assert players[0]["source_rank"] == 1
+            assert players[0]["college_logo_url"].endswith(".png")
+            draft_id = start.json()["draft_run_id"]
+            simulated = client.post(f"/api/drafts/{draft_id}/auto-simulate", headers=headers)
+            assert simulated.status_code == 200, simulated.text
+            state = simulated.json()
+            assert len(state["picks"]) == 31
+            assert state["picks"][0]["player_id"] == players[0]["player_id"]
+            assert state["current_team_id"] == "team-32"
+            assert state["draft_run"]["prospect_snapshot_id"] == report["snapshot_id"]
+            duplicate = client.post(f"/api/drafts/{draft_id}/picks", json={
+                "team_id": "team-32", "player_id": state["picks"][0]["player_id"],
+            }, headers=headers)
+            assert duplicate.status_code == 409
+            rejected = client.post(f"/api/drafts/{draft_id}/prediction", json={
+                "team_id": "team-32", "pick_number": 32, "candidates": [{"player_id": "unreviewed"}],
+            }, headers=headers)
+            assert rejected.status_code == 409
+            picked = {pick["player_id"] for pick in state["picks"]}
+            available = next(player["player_id"] for player in players if player["player_id"] not in picked)
+            completed = client.post(f"/api/drafts/{draft_id}/picks", json={
+                "team_id": "team-32", "player_id": available,
+            }, headers=headers)
+            assert completed.status_code == 201, completed.text
+            result = completed.json()
+            assert result["draft_run"]["status"] == "completed"
+            assert len(result["picks"]) == len({pick["player_id"] for pick in result["picks"]}) == 32
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_approval_cli_defaults_to_preview(session, tmp_path, monkeypatch, capsys):
+    from app.jobs import approve_projected_pool
+
+    report = _import(session, tmp_path)
+    monkeypatch.setattr(approve_projected_pool, "SessionLocal", lambda: Session(session.bind))
+    command = ["approve_projected_pool", "--snapshot-id", report["snapshot_id"]]
+    monkeypatch.setattr("sys.argv", command)
+    assert approve_projected_pool.main() == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "dry_run"
+    assert session.get(ProspectBoardSnapshotRecord, report["snapshot_id"]).projected_pool_approved_at is None
+    monkeypatch.setattr("sys.argv", [*command, "--commit"])
+    assert approve_projected_pool.main() == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "approved"
+    session.expire_all()
+    assert session.get(ProspectBoardSnapshotRecord, report["snapshot_id"]).projected_pool_approved_at is not None

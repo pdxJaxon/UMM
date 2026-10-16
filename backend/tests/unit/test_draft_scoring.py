@@ -34,3 +34,15 @@ def test_unavailable_player_loses_availability_component() -> None:
     )
 
     assert breakdown.availability_bonus == 0
+
+
+def test_source_fallback_applies_concern_penalty_to_single_pass_iterables() -> None:
+    breakdown = calculate_draft_score(
+        player={"id": "projected", "position": "WR", "source_evaluation": 100},
+        team_id="team-1", pick_number=1,
+        team_needs=[], tendencies=[], meetings=[], external_picks=[],
+        concerns=iter([{"severity": "severe", "confidence": "verified", "status": "open"}]),
+        ranking_values={},
+    )
+
+    assert breakdown.player_evaluation == 70

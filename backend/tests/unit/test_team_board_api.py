@@ -44,7 +44,7 @@ def test_team_board_endpoint_includes_player_details() -> None:
             abbreviation="ALA",
             conference="SEC",
             division="FBS",
-            logo_url="logo",
+            logo_url="https://a.espncdn.com/i/teamlogos/ncaa/500/alabama.png",
             official_url="site",
         )
     )
@@ -75,7 +75,7 @@ def test_team_board_endpoint_includes_player_details() -> None:
         assert payload["last_name"] == "Tagovailoa"
         assert payload["position"] == "QB"
         assert payload["college_name"] == "Alabama"
-        assert payload["college_logo_url"] == "logo"
+        assert payload["college_logo_url"] == "https://a.espncdn.com/i/teamlogos/ncaa/500/333.png"
     finally:
         app.dependency_overrides.clear()
         session.close()

@@ -41,11 +41,13 @@ interface BoardEntry {
   name: string;
   position: string;
   school: string;
-  collegeLogoUrl: string;
+  schoolLogoUrl: string | null;
   score: number;
   need: number;
   fit: number;
   source: string;
+  projected?: boolean;
+  sourceRank?: number | null;
 }
 
 interface TeamBoardEntryPayload {
@@ -60,6 +62,9 @@ interface TeamBoardEntryPayload {
   college_name?: string | null;
   college_abbreviation?: string | null;
   college_logo_url?: string | null;
+  is_projected?: boolean;
+  source_rank?: number | null;
+  source_name?: string | null;
 }
 
 interface TeamBoardMetadata {
@@ -84,6 +89,9 @@ interface DraftPlayerPayload {
   position: string;
   college_name: string | null;
   college_abbreviation: string | null;
+  college_logo_url?: string | null;
+  is_projected?: boolean;
+  source_rank?: number | null;
 }
 
 interface StartDraftResponse {
@@ -750,11 +758,13 @@ this.activeEntry = null;
         name,
         position: entry.position ?? 'N/A',
         school: entry.college_name ?? entry.college_abbreviation ?? 'N/A',
-        collegeLogoUrl: entry.college_logo_url ?? '',
+        schoolLogoUrl: entry.college_logo_url || null,
         score: Number(entry.score ?? 0),
         need: needValue,
         fit: fitValue,
-        source: this.boardMode === 'personal' ? 'My board' : 'Default board'
+        source: entry.source_name ?? (this.boardMode === 'personal' ? 'My board' : 'Default board'),
+        projected: entry.is_projected ?? false,
+        sourceRank: entry.source_rank ?? null
       };
     });
   }
@@ -763,7 +773,11 @@ this.activeEntry = null;
     const playersById = new Map(players.map((player) => [player.player_id, player]));
     const preferredEntries = boardEntries
       .filter((entry) => playersById.has(entry.player_id))
-      .map((entry, index) => ({ ...entry, rank: index + 1, source: 'Draft board' }));
+      .map((entry, index) => ({
+        ...entry, rank: index + 1, source: 'Draft board',
+        projected: playersById.get(entry.player_id)?.is_projected ?? false,
+        sourceRank: playersById.get(entry.player_id)?.source_rank ?? null
+      }));
     const preferredIds = new Set(preferredEntries.map((entry) => entry.player_id));
     const additionalEntries = players
       .filter((player) => !preferredIds.has(player.player_id))
@@ -773,11 +787,13 @@ this.activeEntry = null;
         name: [player.first_name, player.last_name].filter(Boolean).join(' ') || 'Unknown prospect',
         position: player.position || 'N/A',
         school: player.college_name ?? player.college_abbreviation ?? 'N/A',
-        collegeLogoUrl: '',
+        schoolLogoUrl: player.college_logo_url || null,
         score: 0,
         need: 0,
         fit: 0,
-        source: 'Draft pool'
+        source: 'Draft pool',
+        projected: player.is_projected ?? false,
+        sourceRank: player.source_rank ?? null
       }));
     return [...preferredEntries, ...additionalEntries];
   }

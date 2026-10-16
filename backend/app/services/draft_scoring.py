@@ -13,6 +13,7 @@ from app.services.ranking_service import (
     calculate_position_adjusted_ranking,
     calculate_team_need_score,
     calculate_team_tendency_fit,
+    calculate_derogatory_penalty,
 )
 
 
@@ -61,7 +62,10 @@ def calculate_draft_score(
 ) -> DraftScoreBreakdown:
     """Calculate a bounded, explainable score for a team/player pairing."""
     weights = weights or DraftScoreWeights()
-    player_evaluation = calculate_adjusted_umm_ranking(ranking_values, concerns)
+    if not ranking_values and player.get("source_evaluation") is not None:
+        player_evaluation = max(float(player["source_evaluation"]) - calculate_derogatory_penalty(concerns), 0.0)
+    else:
+        player_evaluation = calculate_adjusted_umm_ranking(ranking_values, concerns)
     position = str(player.get("position", ""))
     position_adjusted = calculate_position_adjusted_ranking(player_evaluation, position)
     need = calculate_team_need_score(team_needs, position)
