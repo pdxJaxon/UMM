@@ -44,6 +44,19 @@ class TeamRecord(Base):
     boards = relationship("TeamBoardRecord", back_populates="team", cascade="all, delete-orphan")
 
 
+class LeagueDataRefreshRecord(Base):
+    """Immutable reviewed league inputs used for new drafts and default boards."""
+
+    __tablename__ = "league_data_refreshes"
+
+    id = Column(String(64), primary_key=True)
+    draft_year = Column(Integer, nullable=False, index=True)
+    reviewed_on = Column(DateTime, nullable=False)
+    applied_at = Column(DateTime, nullable=False, default=lambda: datetime.now(UTC))
+    prospect_snapshot_id = Column(String(64), ForeignKey("prospect_board_snapshots.id"), nullable=False)
+    manifest = Column(JSON, nullable=False)
+
+
 class TeamNeedRecord(Base):
     """Season-scoped team need with role-specific criticality."""
 
@@ -413,6 +426,7 @@ class DraftRunRecord(Base):
     overall_randomness = Column(Numeric(5, 2), nullable=False, default=50)
     randomness_overrides = Column(JSON, nullable=False, default=dict)
     draft_order = Column(JSON, nullable=False, default=list)
+    order_basis = Column(String(40), nullable=False, default="legacy-unreviewed")
     user = relationship("UserRecord", back_populates="drafts")
     picks = relationship("DraftPickRecord", back_populates="draft_run", cascade="all, delete-orphan")
     trades = relationship("DraftTradeRecord", back_populates="draft_run", cascade="all, delete-orphan")

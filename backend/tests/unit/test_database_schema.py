@@ -48,6 +48,7 @@ def test_database_schema_contains_core_tables() -> None:
         "prospect_source_identities",
         "prospect_board_snapshots",
         "prospect_board_rankings",
+        "league_data_refreshes",
     }
 
 
@@ -197,7 +198,7 @@ def test_initialize_schema_upgrades_previous_sqlite_schema(monkeypatch) -> None:
             "head_coach_id",
             "head_coach_name",
         },
-        "draft_runs": {"randomness_overrides", "overall_randomness", "draft_order", "prospect_snapshot_id"},
+        "draft_runs": {"randomness_overrides", "overall_randomness", "draft_order", "prospect_snapshot_id", "order_basis"},
         "draft_picks": {"randomness_factor", "prediction_metadata"},
         "prospect_source_identities": {"reviewed_name", "reviewed_school"},
         "prospect_board_snapshots": {"projected_pool_approved_at"},

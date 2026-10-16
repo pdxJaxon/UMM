@@ -1,5 +1,9 @@
 # UMockMe
 
+Reviewed, year-specific team-needs and projected-order refreshes are documented
+in [the data workflow](data/README.md#reviewed-team-needs-and-projected-draft-order).
+The pilot models one first-round pick per team, not traded pick ownership.
+
 ## Run locally on Windows
 
 ### Prerequisites

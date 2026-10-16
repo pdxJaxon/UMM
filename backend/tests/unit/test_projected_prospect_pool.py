@@ -408,3 +408,213 @@ def test_recommendation_rejects_invalid_alternatives(session, tmp_path, alternat
     draft = repository.create("user", "team-1", 2027)
     with pytest.raises(ValueError, match="unavailable alternative"):
         repository.recommend(draft)
+
+
+def _league_manifest(snapshot_id):
+    from app.services.league_data_refresh import LeagueRefreshManifest
+
+    source = {"name": "Synthetic test fixture", "url": "https://example.com/test-source", "observed_on": "2026-10-15"}
+    order = [f"team-{number}" for number in range(32, 0, -1)]
+    return LeagueRefreshManifest.model_validate({
+        "draft_year": 2027, "reviewed_on": "2026-10-16", "reviewed_by": "Test reviewer",
+        "prospect_snapshot_id": snapshot_id, "order_basis": "projected-one-pick-per-team",
+        "order_source": source, "draft_order": order,
+        "team_needs": [{
+            "team_id": team_id, "source": source,
+            "needs": [{"position_code": "WR", "role_level": "starter", "need_score": 80,
+                       "quantity": 1, "rationale": "Synthetic test need, not a real roster assessment"}],
+        } for team_id in order],
+    })
+
+
+def test_reviewed_league_refresh_is_previewed_atomic_idempotent_and_preserves_user_state(session, tmp_path, monkeypatch):
+    from app.db.models import LeagueDataRefreshRecord, TeamNeedRecord, TeamRecord
+    from app.services.league_data_refresh import import_league_refresh
+    from app.services.draft_order import draft_order_for_year
+
+    report = _import(session, tmp_path)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    session.commit()
+    old_default = generate_persisted_team_board(session, "team-1", 2027)
+    personal = copy_board_for_user(session, old_default, "user")
+    before = [(entry.id, entry.player_id, entry.rank_position, entry.score) for entry in personal.entries]
+    draft = DraftRepository(session).create("user", "team-1", 2027)
+    old_order = list(draft.draft_order)
+    session.add(TeamNeedRecord(
+        team_id="team-1", draft_year=2027, position_code="QB", role_level="starter",
+        need_score=90, quantity=1, source_name="Old assessment", observed_at=datetime(2026, 10, 1),
+    ))
+    session.commit()
+    manifest = _league_manifest(report["snapshot_id"])
+    preview = import_league_refresh(session, manifest)
+    assert preview["status"] == "dry_run"
+    assert session.query(LeagueDataRefreshRecord).count() == 0
+    assert session.query(TeamBoardRecord).count() == 2
+    assert session.query(TeamNeedRecord).filter_by(is_active=True).count() == 1
+    applied = import_league_refresh(session, manifest, commit=True)
+    assert applied["default_boards_generated"] == 32
+    assert applied["full_refresh_date_unchanged"]
+    assert session.query(LeagueDataRefreshRecord).count() == 1
+    assert session.query(TeamNeedRecord).filter_by(is_active=True).count() == 32
+    assert session.query(TeamNeedRecord).filter_by(is_active=False).count() == 1
+    assert session.query(TeamBoardRecord).count() == 34
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        response = TestClient(app).get("/api/teams?draft_year=2027")
+        assert response.status_code == 200
+        assert [team["id"] for team in response.json()] == manifest.draft_order
+        assert response.json()[0]["draft_order_basis"] == "projected-one-pick-per-team"
+        assert response.json()[0]["draft_order_reviewed_on"] == "2026-10-16"
+    finally:
+        app.dependency_overrides.clear()
+    assert [(entry.id, entry.player_id, entry.rank_position, entry.score) for entry in personal.entries] == before
+    assert draft.draft_order == old_order
+    fresh = DraftRepository(session).create("user", "team-1", 2027)
+    assert fresh.draft_order == manifest.draft_order
+    assert fresh.order_basis == "projected-one-pick-per-team"
+    assert DraftRepository(session).state(draft)["draft_run"]["order_basis"] == "seeded-sample"
+    assert draft_order_for_year(session, 2028) == old_order
+    assert session.get(TeamRecord, "team-1").draft_order == 1
+    assert import_league_refresh(session, manifest, commit=True)["status"] == "unchanged"
+    assert session.query(TeamBoardRecord).count() == 34
+    from app.services import team_board_service
+
+    captured = []
+
+    def capture_candidates(session, team_id, draft_year, candidates, **kwargs):
+        captured.extend(candidates)
+
+    monkeypatch.setattr(team_board_service, "generate_team_board", capture_candidates)
+    generate_persisted_team_board(session, "team-1", 2027)
+    assert captured
+    assert {candidate["pick_number"] for candidate in captured} == {32}
+
+
+@pytest.mark.parametrize("failure", ["duplicate-team", "unknown-position", "wrong-snapshot", "incomplete-teams"])
+def test_reviewed_refresh_rejects_invalid_inputs_without_writes(session, tmp_path, failure):
+    from app.db.models import LeagueDataRefreshRecord, TeamNeedRecord
+    from app.services.league_data_refresh import LeagueRefreshManifest, import_league_refresh
+
+    report = _import(session, tmp_path)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    session.commit()
+    payload = _league_manifest(report["snapshot_id"]).model_dump(mode="json")
+    if failure == "duplicate-team":
+        payload["team_needs"][0]["team_id"] = payload["team_needs"][1]["team_id"]
+    elif failure == "unknown-position":
+        payload["team_needs"][0]["needs"][0]["position_code"] = "FAKE"
+    elif failure == "wrong-snapshot":
+        payload["prospect_snapshot_id"] = "unapproved"
+    else:
+        payload["draft_order"][0] = "unknown-team"
+    with pytest.raises(ValueError):
+        import_league_refresh(session, LeagueRefreshManifest.model_validate(payload), commit=True)
+    assert session.query(LeagueDataRefreshRecord).count() == 0
+    assert session.query(TeamNeedRecord).count() == 0
+    assert session.query(TeamBoardRecord).count() == 0
+
+
+def test_reviewed_refresh_rolls_back_all_needs_and_defaults_on_generation_failure(session, tmp_path, monkeypatch):
+    from app.db.models import LeagueDataRefreshRecord, TeamNeedRecord
+    from app.services import league_data_refresh
+
+    report = _import(session, tmp_path)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    session.commit()
+    manifest = _league_manifest(report["snapshot_id"])
+    generate = league_data_refresh.generate_persisted_team_board
+    calls = []
+
+    def fail_second_board(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 2:
+            raise RuntimeError("Injected generation failure")
+        return generate(*args, **kwargs)
+
+    monkeypatch.setattr(league_data_refresh, "generate_persisted_team_board", fail_second_board)
+    with pytest.raises(RuntimeError, match="Injected"):
+        league_data_refresh.import_league_refresh(session, manifest, commit=True)
+    assert session.query(LeagueDataRefreshRecord).count() == 0
+    assert session.query(TeamNeedRecord).count() == 0
+    assert session.query(TeamBoardRecord).count() == 0
+
+
+@pytest.mark.parametrize("field,value", [
+    ("order_basis", "official"),
+    ("reviewed_on", "2999-01-01"),
+    ("reviewed_by", " "),
+])
+def test_reviewed_manifest_rejects_unreviewed_or_misleading_metadata(field, value):
+    from app.services.league_data_refresh import LeagueRefreshManifest
+
+    payload = _league_manifest("snapshot").model_dump(mode="json")
+    payload[field] = value
+    with pytest.raises(ValueError):
+        LeagueRefreshManifest.model_validate(payload)
+
+
+def test_league_refresh_cli_previews_without_mutation(session, tmp_path, monkeypatch, capsys):
+    from app.jobs import import_league_refresh
+    from app.db.models import LeagueDataRefreshRecord
+
+    report = _import(session, tmp_path)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    session.commit()
+    manifest_path = tmp_path / "reviewed.json"
+    manifest_path.write_text(_league_manifest(report["snapshot_id"]).model_dump_json(), encoding="utf-8")
+    monkeypatch.setattr(import_league_refresh, "SessionLocal", lambda: Session(session.bind))
+    monkeypatch.setattr("sys.argv", ["import_league_refresh", "--manifest", str(manifest_path)])
+    assert import_league_refresh.main() == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "dry_run"
+    assert session.query(LeagueDataRefreshRecord).count() == 0
+    monkeypatch.setattr("sys.argv", ["import_league_refresh", "--schema"])
+    assert import_league_refresh.main() == 0
+    assert "order_source" in json.loads(capsys.readouterr().out)["properties"]
+
+
+@pytest.mark.parametrize("change", ["duplicate-role", "late-source", "invalid-score", "unknown-field"])
+def test_league_refresh_rejects_invalid_evidence(session, tmp_path, change):
+    from app.services.league_data_refresh import LeagueRefreshManifest, import_league_refresh
+
+    report = _import(session, tmp_path)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    payload = _league_manifest(report["snapshot_id"]).model_dump(mode="json")
+    if change == "duplicate-role":
+        payload["team_needs"][0]["needs"] *= 2
+    elif change == "late-source":
+        payload["order_source"]["observed_on"] = "2026-10-17"
+    elif change == "invalid-score":
+        payload["team_needs"][0]["needs"][0]["need_score"] = 101
+    else:
+        payload["official_order"] = True
+    with pytest.raises(ValueError):
+        import_league_refresh(session, LeagueRefreshManifest.model_validate(payload), commit=True)
+
+
+def test_later_league_review_retains_history_and_rejects_stale_replay(session, tmp_path, monkeypatch):
+    from app.db.models import LeagueDataRefreshRecord, TeamNeedRecord
+    from app.services import league_data_refresh
+
+    class ReviewDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 10, 18, tzinfo=tz)
+
+    monkeypatch.setattr(league_data_refresh, "datetime", ReviewDateTime)
+    report = _import(session, tmp_path)
+    approve_projected_snapshot(session, report["snapshot_id"])
+    first = _league_manifest(report["snapshot_id"])
+    league_data_refresh.import_league_refresh(session, first, commit=True)
+    payload = first.model_dump(mode="json")
+    payload["reviewed_on"] = "2026-10-17"
+    payload["draft_order"] = list(reversed(payload["draft_order"]))
+    payload["team_needs"][0]["needs"][0]["need_score"] = 70
+    second = league_data_refresh.LeagueRefreshManifest.model_validate(payload)
+    league_data_refresh.import_league_refresh(session, second, commit=True)
+    assert session.query(LeagueDataRefreshRecord).count() == 2
+    assert session.query(TeamNeedRecord).filter_by(draft_year=2027, is_active=True).count() == 32
+    assert session.query(TeamNeedRecord).filter_by(source_name="Synthetic test fixture").count() == 64
+    from app.services.draft_order import draft_order_for_year
+    assert draft_order_for_year(session, 2027) == second.draft_order
+    with pytest.raises(ValueError, match="later"):
+        league_data_refresh.import_league_refresh(session, first, commit=True)

@@ -9,6 +9,7 @@ interface TeamOption {
   abbreviation: string;
   logo_url: string;
   randomness_score: number;
+  draft_order_basis?: string;
 }
 
 interface TeamColors {
@@ -106,6 +107,7 @@ interface DraftStateResponse {
     season_year: number;
     status: string;
     draft_order: string[];
+    order_basis?: string;
   };
   current_pick_number: number;
   current_team_id: string;
@@ -250,6 +252,14 @@ export class AppComponent implements OnInit {
 
   protected get selectedTeamName(): string {
     return this.teams.find((team) => team.id === this.selectedTeamId)?.name ?? 'Select team';
+  }
+
+  protected get draftOrderLabel(): string {
+    const basis = this.draftState?.draft_run.order_basis
+      ?? this.teams.find((team) => team.id === this.selectedTeamId)?.draft_order_basis;
+    return basis === 'projected-one-pick-per-team'
+      ? 'Projected draft order - one pick per team; traded ownership is not modeled.'
+      : 'Sample/unreviewed draft order - not the official NFL order.';
   }
 
   protected get selectedTeamAbbreviation(): string {

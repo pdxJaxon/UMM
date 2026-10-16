@@ -15,6 +15,7 @@ from app.services.ranking_service import select_with_team_randomness
 from app.services.trade_engine import evaluate_trade
 from app.services.prospect_pool import latest_projected_snapshot, pool_filter, snapshot_rankings
 from app.db.college_seed import college_logo_url
+from app.services.draft_order import draft_order_for_year, latest_league_refresh
 
 TEAM_ORDER = tuple(f"team-{number}" for number in range(1, 33))
 
@@ -45,7 +46,7 @@ class DraftRepository:
             raise ValueError("Overall randomness must be between 0 and 100")
         if any(not 0 <= float(value) <= 100 for value in overrides.values()):
             raise ValueError("Randomness overrides must be between 0 and 100")
-        team_order = [team.id for team in self.session.scalars(select(TeamRecord).order_by(TeamRecord.draft_order))]
+        team_order = draft_order_for_year(self.session, draft_year)
         if controlled_team_id not in team_order:
             raise ValueError("Controlled team does not have a draft position")
         snapshot = latest_projected_snapshot(self.session, draft_year)
@@ -62,6 +63,7 @@ class DraftRepository:
             draft_year=draft_year, status="drafting", overall_randomness=overall_randomness,
             randomness_overrides=overrides, draft_order=team_order,
             prospect_snapshot_id=snapshot_id,
+            order_basis="projected-one-pick-per-team" if latest_league_refresh(self.session, draft_year) else "seeded-sample",
         )
         self.session.add(draft)
         self.session.flush()
@@ -254,6 +256,7 @@ class DraftRepository:
                 "overall_randomness": float(draft.overall_randomness),
                 "randomness_overrides": draft.randomness_overrides,
                 "draft_order": self._draft_order(draft),
+                "order_basis": draft.order_basis,
                 "prospect_snapshot_id": draft.prospect_snapshot_id,
             },
             "current_pick_number": len(picks) + 1,

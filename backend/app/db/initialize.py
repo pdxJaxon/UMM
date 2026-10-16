@@ -111,6 +111,7 @@ def initialize_schema() -> None:
                 "randomness_overrides": "JSON NOT NULL DEFAULT '{}'",
                 "overall_randomness": "NUMERIC(5, 2) NOT NULL DEFAULT 50",
                 "draft_order": "JSON NOT NULL DEFAULT '[]'",
+                "order_basis": "VARCHAR(40) NOT NULL DEFAULT 'legacy-unreviewed'",
             },
             "draft_picks": {
                 "randomness_factor": "NUMERIC(5, 2) NOT NULL DEFAULT 0",
