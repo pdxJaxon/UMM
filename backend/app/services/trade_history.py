@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from typing import Any, Protocol
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.db.models import HistoricalDraftTradeRecord, TeamDraftingTendencyRecord, TeamLeadershipRecord, TeamRecord
@@ -96,6 +96,10 @@ class LeadershipIngestionService:
                     TeamLeadershipRecord.start_year == start_year,
                 )
             )
+            if existing is not None and end_year is not None:
+                existing.end_year = end_year
+                existing.observed_at = timestamp
+                existing.raw_payload = row
             if existing is None:
                 self.session.add(TeamLeadershipRecord(
                     team_id=team_id,
@@ -166,10 +170,13 @@ class DraftTradeHistoryIngestionService:
             counts[(event.moving_down_team_id, None, None)]["trade_down"] += 1
             if event.general_manager_id:
                 counts[(event.moving_up_team_id, "gm", event.general_manager_id)]["trade_up"] += 1
-                counts[(event.moving_down_team_id, "gm", event.general_manager_id)]["trade_down"] += 1
             if event.head_coach_id:
                 counts[(event.moving_up_team_id, "head_coach", event.head_coach_id)]["trade_up"] += 1
-                counts[(event.moving_down_team_id, "head_coach", event.head_coach_id)]["trade_down"] += 1
+        self.session.execute(
+            delete(TeamDraftingTendencyRecord).where(
+                TeamDraftingTendencyRecord.source_name == "historical-trade-analysis"
+            )
+        )
         for (team_id, actor_type, actor_id), directions in counts.items():
             total = directions["trade_up"] + directions["trade_down"]
             for tendency_type, count in directions.items():

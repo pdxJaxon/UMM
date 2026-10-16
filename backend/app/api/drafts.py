@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
-from app.db.models import TeamRecord, UserRecord
+from app.db.models import DraftPickRecord, PlayerRecord, TeamRecord, UserRecord
 from app.db.session import get_db
 from app.services.draft_repository import DraftRepository
 from app.services.llm_prediction import OpenAICompatiblePredictionProvider, PredictionContext, predict_pick
@@ -64,6 +65,7 @@ def start_draft(
         "draft_run_id": draft.id,
         "status": draft.status,
         "controlled_team_id": draft.controlled_team_id,
+        "eligible_players": repository.eligible_players(draft),
     }
 
 
@@ -100,6 +102,21 @@ def predict_current_pick(
         team = session.get(TeamRecord, payload.team_id)
         if team is None:
             raise ValueError("Prediction team does not exist")
+        candidate_ids = [candidate.get("player_id") for candidate in payload.candidates]
+        if any(not isinstance(player_id, str) or not player_id for player_id in candidate_ids):
+            raise ValueError("Each prediction candidate must include a player ID")
+        eligible_candidate_ids = set(session.scalars(
+            select(PlayerRecord.id).where(
+                PlayerRecord.id.in_(candidate_ids),
+                PlayerRecord.draft_year == draft.draft_year,
+                PlayerRecord.eligibility_status == "eligible",
+                ~PlayerRecord.id.in_(
+                    select(DraftPickRecord.player_id).where(DraftPickRecord.draft_run_id == draft.id)
+                ),
+            )
+        ))
+        if eligible_candidate_ids != set(candidate_ids):
+            raise ValueError("Prediction candidates must be eligible and not already selected for this draft")
         team_randomness = draft.randomness_overrides.get(payload.team_id, float(team.randomness_score or 50))
         result = predict_pick(
             PredictionContext(

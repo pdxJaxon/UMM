@@ -1,5 +1,6 @@
 """Tests for the PostgreSQL draft repository behavior."""
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -64,3 +65,54 @@ def test_repository_enforces_owner_and_duplicate_rules() -> None:
         raise AssertionError("Expected duplicate validation")
     except ValueError as error:
         assert str(error) == "Player has already been selected"
+
+
+@pytest.mark.parametrize(
+    ("player_id", "draft_year", "eligibility_status", "message"),
+    [
+        ("wrong-year", 2027, "eligible", "draft year"),
+        ("unconfirmed", 2026, "unconfirmed", "not eligible"),
+    ],
+)
+def test_repository_rejects_ineligible_manual_picks(player_id, draft_year, eligibility_status, message) -> None:
+    session = _session()
+    session.add(PlayerRecord(
+        id=player_id,
+        first_name="Test",
+        last_name="Prospect",
+        position="QB",
+        college_id="alabama",
+        draft_year=draft_year,
+        eligibility_status=eligibility_status,
+    ))
+    session.flush()
+    repository = DraftRepository(session)
+    draft = repository.create("user-1", "team-1", 2026)
+
+    with pytest.raises(ValueError, match=message):
+        repository.add_pick(draft, "team-1", player_id, "USER")
+
+
+def test_auto_simulation_reuses_team_tendencies_across_trades_and_predictions() -> None:
+    session = _session()
+    class PredictionProvider:
+        provider_name = "test-provider"
+        model_name = "test-model"
+
+        def complete(self, _prompt, _randomness):
+            return {"selected_player_id": "draft-class-01", "confidence": 0.5}
+
+    repository = DraftRepository(session, PredictionProvider())
+    draft = repository.create("user-1", "team-2", 2026)
+    calls = []
+
+    def load_tendencies(team_id, _draft_year):
+        calls.append(team_id)
+        return []
+
+    repository._team_tendencies = load_tendencies
+
+    repository.auto_simulate(draft)
+
+    assert len(calls) == len(set(calls))
+    assert calls.count("team-1") == 1

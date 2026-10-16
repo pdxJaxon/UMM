@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.models import DraftPickRecord, DraftRunRecord, DraftTradeRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, TeamNeedRecord
+from app.db.models import CollegeRecord, DraftPickRecord, DraftRunRecord, DraftTradeRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, TeamNeedRecord
 from app.services.llm_prediction import OpenAICompatiblePredictionProvider, PredictionContext, PredictionProvider, predict_pick
 from app.services.leadership_tendencies import get_effective_tendencies
 from app.services.ranking_service import select_with_team_randomness
@@ -83,8 +83,13 @@ class DraftRepository:
     ) -> DraftPickRecord:
         """Persist a unique pick and enforce the current draft order."""
         picks = self._ordered_picks(draft.id)
-        if self.session.get(PlayerRecord, player_id) is None:
+        player = self.session.get(PlayerRecord, player_id)
+        if player is None:
             raise ValueError("Player does not exist")
+        if player.draft_year != draft.draft_year:
+            raise ValueError("Player is not part of this draft year")
+        if player.eligibility_status != "eligible":
+            raise ValueError("Player is not eligible for this draft")
         if any(pick.player_id == player_id for pick in picks):
             raise ValueError("Player has already been selected")
         if team_id != self.current_team_id(len(picks), self._draft_order(draft)):
@@ -105,10 +110,11 @@ class DraftRepository:
     def auto_simulate(self, draft: DraftRunRecord) -> None:
         """Select available players until the controlled team is on the clock."""
         picks = self._ordered_picks(draft.id)
+        tendency_cache: dict[str, list[dict[str, object]]] = {}
         while draft.status != "completed" and self.current_team_id(len(picks), self._draft_order(draft)) != draft.controlled_team_id:
             selected = {pick.player_id for pick in picks}
             pick_index = len(picks)
-            self._maybe_execute_trade(draft, pick_index)
+            self._maybe_execute_trade(draft, pick_index, tendency_cache)
             team_id = self.current_team_id(pick_index, self._draft_order(draft))
             if team_id == draft.controlled_team_id:
                 break
@@ -143,7 +149,7 @@ class DraftRepository:
                         pick_number=len(picks) + 1,
                         candidates=tuple(self._candidate_context(remaining)),
                         team_needs=tuple(self._team_needs(team_id, draft.draft_year)),
-                        team_tendencies=tuple(self._team_tendencies(team_id, draft.draft_year)),
+                        team_tendencies=tuple(self._cached_team_tendencies(team_id, draft.draft_year, tendency_cache)),
                         overall_randomness=float(draft.overall_randomness),
                         team_randomness=float(draft.randomness_overrides.get(team_id, team.randomness_score or 50)) if team else 50,
                     ),
@@ -201,6 +207,29 @@ class DraftRepository:
             ],
         }
 
+    def eligible_players(self, draft: DraftRunRecord) -> list[dict[str, object]]:
+        """Return all eligible players for a draft year, independent of team boards."""
+        rows = self.session.execute(
+            select(PlayerRecord, CollegeRecord.name, CollegeRecord.abbreviation)
+            .outerjoin(CollegeRecord, CollegeRecord.id == PlayerRecord.college_id)
+            .where(
+                PlayerRecord.draft_year == draft.draft_year,
+                PlayerRecord.eligibility_status == "eligible",
+            )
+            .order_by(PlayerRecord.id)
+        ).all()
+        return [
+            {
+                "player_id": player.id,
+                "first_name": player.first_name,
+                "last_name": player.last_name,
+                "position": player.position,
+                "college_name": college_name,
+                "college_abbreviation": college_abbreviation,
+            }
+            for player, college_name, college_abbreviation in rows
+        ]
+
     @staticmethod
     def current_team_id(pick_count: int, draft_order: list[str] | None = None) -> str:
         """Return the team assigned to the next pick."""
@@ -211,11 +240,16 @@ class DraftRepository:
         """Return the persisted order, with compatibility for pre-trade runs."""
         return list(draft.draft_order or TEAM_ORDER)
 
-    def _maybe_execute_trade(self, draft: DraftRunRecord, pick_index: int) -> DraftTradeRecord | None:
+    def _maybe_execute_trade(
+        self,
+        draft: DraftRunRecord,
+        pick_index: int,
+        tendency_cache: dict[str, list[dict[str, object]]],
+    ) -> DraftTradeRecord | None:
         """Apply the strongest qualifying trade before the current pick."""
         order = self._draft_order(draft)
         tendencies = {
-            team_id: self._team_tendencies(team_id, draft.draft_year)
+            team_id: self._cached_team_tendencies(team_id, draft.draft_year, tendency_cache)
             for team_id in set(order)
         }
         proposal = evaluate_trade(order, pick_index, tendencies)
@@ -315,6 +349,17 @@ class DraftRepository:
     def _team_tendencies(self, team_id: str, draft_year: int) -> list[dict[str, object]]:
         """Load active historical tendencies into model-safe dictionaries."""
         return get_effective_tendencies(self.session, team_id, draft_year)
+
+    def _cached_team_tendencies(
+        self,
+        team_id: str,
+        draft_year: int,
+        cache: dict[str, list[dict[str, object]]],
+    ) -> list[dict[str, object]]:
+        """Reuse a team's effective tendencies throughout one simulation request."""
+        if team_id not in cache:
+            cache[team_id] = self._team_tendencies(team_id, draft_year)
+        return cache[team_id]
 
     @staticmethod
     def _effective_randomness(overall_randomness: float, team_randomness: float) -> float:

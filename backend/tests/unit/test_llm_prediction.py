@@ -63,3 +63,26 @@ def test_prediction_rejects_invalid_confidence() -> None:
 
     with pytest.raises(ValueError, match="confidence"):
         predict_pick(_context(), provider)
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("confidence", "confidence"),
+        ("alternatives", "alternatives"),
+        ("reasoning_factors", "reasoning factors"),
+        ("evidence", "evidence"),
+    ],
+)
+def test_prediction_rejects_null_fields_with_value_error(field, message) -> None:
+    payload = {
+        "selected_player_id": "player-a",
+        "confidence": 0.5,
+        "alternatives": [],
+        "reasoning_factors": [],
+        "evidence": [],
+    }
+    payload[field] = None
+
+    with pytest.raises(ValueError, match=message):
+        predict_pick(_context(), FakePredictionProvider(payload))

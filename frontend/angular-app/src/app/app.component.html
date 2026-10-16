@@ -5,6 +5,11 @@
     <button class="profile" [attr.aria-label]="isAuthenticated ? 'Sign out' : 'Account controls'" (click)="isAuthenticated && logout()">{{ isAuthenticated ? 'ON' : 'UM' }}</button>
   </header>
 
+  <aside class="prospect-notice" aria-label="Projected prospect information">
+    <strong>Projected prospects</strong>
+    Player inclusion does not confirm draft eligibility or declaration. Individual player status and rankings may change as new information becomes available.
+  </aside>
+
   <section class="account-bar" aria-label="Account controls">
     <ng-container *ngIf="!isAuthenticated; else signedIn">
       <div class="account-copy">
@@ -130,7 +135,7 @@
       <div *ngIf="draft.draft_run.status === 'drafting' && draftOnControlledTeam" class="draft-on-clock">
         <div>
           <p class="eyebrow">YOUR PICK / {{ draft.current_pick_number | number:'2.0-0' }}</p>
-          <label for="draft-player">Select a prospect from {{ teamName(draft.draft_run.controlled_team_id) }}'s board</label>
+          <label for="draft-player">Select an eligible draft prospect</label>
         </div>
         <select id="draft-player" [(ngModel)]="draftSelectedPlayerId" [disabled]="draftBusy || draftCandidates.length === 0">
           <option *ngFor="let candidate of draftCandidates" [value]="candidate.player_id">
@@ -138,7 +143,7 @@
           </option>
         </select>
         <button class="action primary" (click)="submitDraftPick()" [disabled]="draftBusy || !draftSelectedPlayerId">Make pick</button>
-        <p *ngIf="draftCandidates.length === 0" class="draft-empty">No available players remain on this board.</p>
+        <p *ngIf="draftCandidates.length === 0" class="draft-empty">No eligible players remain.</p>
       </div>
 
       <div *ngIf="draft.draft_run.status === 'drafting' && !draftOnControlledTeam && !draftBusy && !draftError" class="draft-status" role="status">
