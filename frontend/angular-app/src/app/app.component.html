@@ -1,11 +1,18 @@
 <main class="shell" [style.--team-primary]="selectedTeamColors.primary" [style.--team-secondary]="selectedTeamColors.secondary">
   <header class="topbar">
     <div class="brand"><span class="brand-mark">UM</span><span>UMockMe</span><small>Draft room</small></div>
-    <div class="season"><span class="season-label">2027 NFL DRAFT</span><span class="live-dot"></span> LIVE BOARD</div>
+    <div class="season">
+      <span class="season-label">2027 NFL DRAFT</span>
+      <span class="live-board"><span class="live-dot"></span> LIVE BOARD</span>
+      <time *ngIf="dataUpdatedOn; else dataDateStatus" class="updated-date" [attr.datetime]="dataUpdatedOn">all data updated {{ (dataUpdatedOn + 'T00:00:00Z') | date:'MM/dd/yyyy':'UTC' }}</time>
+      <ng-template #dataDateStatus>
+        <span class="updated-date">{{ dataDateLoading ? 'Loading update date...' : dataDateError ? 'Update date unavailable' : 'Full refresh date not recorded' }}</span>
+      </ng-template>
+    </div>
     <button class="profile" [attr.aria-label]="isAuthenticated ? 'Sign out' : 'Account controls'" (click)="isAuthenticated && logout()">{{ isAuthenticated ? 'ON' : 'UM' }}</button>
   </header>
 
-  <aside class="prospect-notice" aria-label="Prospect information">
+  <aside *ngIf="isAuthenticated" class="prospect-notice" aria-label="Prospect information">
     <strong>Prospect information</strong>
     Player inclusion does not confirm draft eligibility or declaration. Individual player status and rankings may change as new information becomes available.
   </aside>
@@ -35,8 +42,8 @@
     </ng-container>
     <ng-template #signedIn>
       <div class="account-copy">
-        <strong>Signed in</strong>
-        <span>{{ authMessage ?? 'Your personal board is ready to use.' }}</span>
+        <strong>Signed in as {{ signedInEmail }}</strong>
+        <span *ngIf="authMessage" role="status">{{ authMessage }}</span>
       </div>
       <div class="account-preference">
         <label for="favorite-team">FAVORITE TEAM</label>
@@ -246,7 +253,6 @@
     <section class="guest-workspace" aria-label="UMockMe welcome">
       <div class="guest-radar" aria-hidden="true"><span></span><span></span><span></span></div>
       <p class="eyebrow">UMOCKME / DRAFT ROOM</p>
-      <h1>You control your own big board<br><em>with your team's draft tendencies.</em></h1>
       <p class="guest-copy">A data driven NFL Draft workspace for better predictions, ultimate customization and AI Driven Picks.</p>
       <p class="guest-claim">The most accurate prediction engine in the mock draft industry.</p>
       <div class="guest-signals" aria-label="UMockMe features">

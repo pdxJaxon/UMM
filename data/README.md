@@ -127,6 +127,20 @@ Custom logo URLs are preserved. If an image cannot load, the school name remains
 visible without a broken-image placeholder. Projection notices remain in the
 page notice and evidence panel rather than repeating on every prospect row.
 
+After completing and validating a full refresh of prospects, team needs, and
+draft order, record its completion date with `DATA_UPDATED_ON=YYYY-MM-DD` in the
+backend environment (or local `.env`), then restart the API. Do not advance this
+date for partial imports or individual board saves. No full-refresh date is
+assumed by default.
+
+The public `GET /api/data/status` endpoint returns that explicit date as
+`updated_on` (`YYYY-MM-DD`), or `null` when none is recorded. The homepage displays
+`all data updated MM/DD/YYYY` beside Live Board. It does not infer the date from
+prospect snapshots, board saves, or the current clock. Loading, missing data, and
+request failures have distinct labels.
+The eligibility banner is shown only in the authenticated board workspace;
+the individual projected prospect disclaimer remains in the evidence panel.
+
 ## Permissioned 2027 PFF prospect boards
 
 Only collect and import PFF data when your permission covers automated retrieval,
