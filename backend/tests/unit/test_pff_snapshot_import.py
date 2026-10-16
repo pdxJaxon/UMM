@@ -194,6 +194,34 @@ def test_transfer_requires_reviewed_override_and_retains_profile(session):
     assert alias.player_id == existing.id
 
 
+@pytest.mark.parametrize(("field", "value"), [("name", "Test Runner II."), ("school", "Texas")])
+def test_persistent_mapping_identity_changes_require_review_and_then_reuse(session, field, value):
+    payload = _payload()
+    payload["prospects"][0]["source_record_id"] = "pff-runner"
+    first_snapshot = PFFBoardSnapshot.model_validate(payload)
+    first = import_board_snapshot(session, first_snapshot, commit=True)
+    session.commit()
+    player_id = first["identities"][0]["player_id"]
+
+    payload["collected_at"] = "2026-10-21T20:22:57Z"
+    payload["prospects"][0][field] = value
+    changed_snapshot = PFFBoardSnapshot.model_validate(payload)
+    with pytest.raises(ValueError, match="Source identity changed"):
+        import_board_snapshot(session, changed_snapshot, commit=True)
+    assert session.query(ProspectBoardSnapshotRecord).count() == 1
+
+    import_board_snapshot(
+        session, changed_snapshot, {changed_snapshot.prospects[0].key: player_id}, commit=True,
+    )
+    session.commit()
+    payload["collected_at"] = "2026-10-28T20:22:57Z"
+    reviewed_snapshot = PFFBoardSnapshot.model_validate(payload)
+    report = import_board_snapshot(session, reviewed_snapshot, commit=True)
+    session.commit()
+    assert report["existing_players"] == 2
+    assert report["identities"][0]["player_id"] == player_id
+
+
 def test_ambiguous_names_are_never_silently_merged(session):
     _existing(session, "existing-1")
     _existing(session, "existing-2")

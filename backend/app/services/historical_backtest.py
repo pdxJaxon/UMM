@@ -15,6 +15,37 @@ from app.services.nflverse_provider import NflverseProvider
 from app.services.prediction_accuracy import evaluate_prediction_accuracy
 
 
+NFL_DRAFT_START_DATES = {
+    2000: date(2000, 4, 15),
+    2001: date(2001, 4, 21),
+    2002: date(2002, 4, 20),
+    2003: date(2003, 4, 26),
+    2004: date(2004, 4, 24),
+    2005: date(2005, 4, 23),
+    2006: date(2006, 4, 29),
+    2007: date(2007, 4, 28),
+    2008: date(2008, 4, 26),
+    2009: date(2009, 4, 25),
+    2010: date(2010, 4, 22),
+    2011: date(2011, 4, 28),
+    2012: date(2012, 4, 26),
+    2013: date(2013, 4, 25),
+    2014: date(2014, 5, 8),
+    2015: date(2015, 4, 30),
+    2016: date(2016, 4, 28),
+    2017: date(2017, 4, 27),
+    2018: date(2018, 4, 26),
+    2019: date(2019, 4, 25),
+    2020: date(2020, 4, 23),
+    2021: date(2021, 4, 29),
+    2022: date(2022, 4, 28),
+    2023: date(2023, 4, 27),
+    2024: date(2024, 4, 25),
+    2025: date(2025, 4, 24),
+    2026: date(2026, 4, 23),
+}
+
+
 @dataclass(frozen=True)
 class HistoricalDraftDataset:
     """All information available to the engine for one historical draft."""
@@ -84,7 +115,7 @@ class FileHistoricalDraftDatasetProvider:
         """Return snapshots limited to the requested seasons, when provided."""
         with self.path.open(encoding="utf-8") as handle:
             payload = json.load(handle)
-        records = payload.get("datasets") if isinstance(payload, dict) else payload
+        records = payload.get("datasets", payload) if isinstance(payload, dict) else payload
         if isinstance(records, dict):
             records = [records]
         if not isinstance(records, list):
@@ -195,7 +226,8 @@ def run_historical_backtest(
     """
     team_results: list[dict[str, object]] = []
     for dataset in sorted(datasets, key=lambda item: item.draft_year):
-        if dataset.as_of > date(dataset.draft_year, 4, 1):
+        draft_start = NFL_DRAFT_START_DATES.get(dataset.draft_year, date(dataset.draft_year, 4, 1))
+        if dataset.as_of >= draft_start:
             raise ValueError(f"Dataset for {dataset.draft_year} contains information observed after the draft began")
         prospect_ids = {str(prospect.get("player_id") or prospect.get("id")) for prospect in dataset.prospects}
         for team_id, actual_picks in dataset.actual_picks.items():

@@ -82,7 +82,7 @@ class OpenAICompatiblePredictionProvider:
                 headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"},
                 json={
                     "model": self.model_name,
-                    "temperature": _temperature_from_randomness(randomness),
+                    **({"temperature": _temperature_from_randomness(randomness)} if self.model_name != "gpt-5" else {}),
                     "response_format": {"type": "json_object"},
                     "messages": [
                         {"role": "system", "content": "Return only the requested JSON object."},
@@ -151,12 +151,27 @@ def predict_pick(context: PredictionContext, provider: PredictionProvider) -> Pr
     selected_player_id = str(raw.get("selected_player_id", ""))
     if selected_player_id not in candidate_ids:
         raise ValueError("LLM selected a player outside the available candidate pool")
-    confidence = float(raw.get("confidence", -1))
+    confidence_value = raw.get("confidence", -1)
+    if confidence_value is None:
+        raise ValueError("LLM confidence must be between 0 and 1")
+    try:
+        confidence = float(confidence_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("LLM confidence must be between 0 and 1") from exc
     if not 0 <= confidence <= 1:
         raise ValueError("LLM confidence must be between 0 and 1")
-    alternatives = tuple(raw.get("alternatives", ()))
-    reasoning_factors = tuple(str(item) for item in raw.get("reasoning_factors", ()))
-    evidence = tuple(str(item) for item in raw.get("evidence", ()))
+    alternatives_value = raw.get("alternatives", ())
+    reasoning_factors_value = raw.get("reasoning_factors", ())
+    evidence_value = raw.get("evidence", ())
+    if not isinstance(alternatives_value, (list, tuple)):
+        raise ValueError("LLM alternatives must be a list")
+    if not isinstance(reasoning_factors_value, (list, tuple)):
+        raise ValueError("LLM reasoning factors must be a list")
+    if not isinstance(evidence_value, (list, tuple)):
+        raise ValueError("LLM evidence must be a list")
+    alternatives = tuple(alternatives_value)
+    reasoning_factors = tuple(str(item) for item in reasoning_factors_value)
+    evidence = tuple(str(item) for item in evidence_value)
     return PredictionResult(
         team_id=context.team_id,
         pick_number=context.pick_number,

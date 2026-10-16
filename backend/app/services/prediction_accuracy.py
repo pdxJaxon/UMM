@@ -21,6 +21,7 @@ def evaluate_prediction_accuracy(
     somewhere in the evaluated picks; exact accuracy additionally requires the
     predicted and actual pick numbers to match.
     """
+    predictions = list(predictions)
     predicted_by_player = {
         str(prediction["player_id"]): int(prediction["pick_number"])
         for prediction in predictions

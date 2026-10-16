@@ -88,12 +88,46 @@ def initialize_schema() -> None:
     """Create all configured tables in the active database."""
     Base.metadata.create_all(bind=engine)
     if engine.dialect.name == "sqlite":
+        sqlite_columns = {
+            "users": {
+                "favorite_team_id": "VARCHAR(64) REFERENCES teams(id)",
+            },
+            "teams": {
+                "randomness_score": "NUMERIC(5, 2) NOT NULL DEFAULT 50",
+            },
+            "team_drafting_tendencies": {
+                "actor_type": "VARCHAR(20)",
+                "actor_id": "VARCHAR(120)",
+                "actor_name": "VARCHAR(150)",
+            },
+            "historical_draft_trades": {
+                "general_manager_id": "VARCHAR(120)",
+                "general_manager_name": "VARCHAR(150)",
+                "head_coach_id": "VARCHAR(120)",
+                "head_coach_name": "VARCHAR(150)",
+            },
+            "draft_runs": {
+                "randomness_overrides": "JSON NOT NULL DEFAULT '{}'",
+                "overall_randomness": "NUMERIC(5, 2) NOT NULL DEFAULT 50",
+                "draft_order": "JSON NOT NULL DEFAULT '[]'",
+            },
+            "draft_picks": {
+                "randomness_factor": "NUMERIC(5, 2) NOT NULL DEFAULT 0",
+                "prediction_metadata": "JSON NOT NULL DEFAULT '{}'",
+            },
+            "prospect_source_identities": {
+                "reviewed_name": "VARCHAR(200)",
+                "reviewed_school": "VARCHAR(100)",
+            },
+        }
         with engine.begin() as connection:
-            columns = {column["name"] for column in inspect(connection).get_columns("users")}
-            if "favorite_team_id" not in columns:
-                connection.execute(
-                    text("ALTER TABLE users ADD COLUMN favorite_team_id VARCHAR(64) REFERENCES teams(id)")
-                )
+            for table_name, additions in sqlite_columns.items():
+                columns = {column["name"] for column in inspect(connection).get_columns(table_name)}
+                for column_name, definition in additions.items():
+                    if column_name not in columns:
+                        connection.execute(
+                            text(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+                        )
             connection.execute(text("CREATE INDEX IF NOT EXISTS ix_users_favorite_team_id ON users(favorite_team_id)"))
 
 

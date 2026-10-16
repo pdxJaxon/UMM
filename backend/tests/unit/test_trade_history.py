@@ -65,6 +65,66 @@ def test_refresh_persists_events_and_aggregate_direction_tendencies() -> None:
     assert float(arizona_down.preference_score) == 83.33
 
 
+def test_refresh_removes_obsolete_actor_tendencies_without_touching_other_sources() -> None:
+    """Recomputed counts must remove stale actor rows from previous trade analysis."""
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        session.add_all(TeamRecord(**team) for team in TEAMS[:3])
+        session.add(HistoricalDraftTradeRecord(
+            draft_year=2024,
+            pick_number=1,
+            moving_up_team_id="team-2",
+            moving_down_team_id="team-1",
+            general_manager_id="gm-a",
+            head_coach_id="coach-a",
+            source_name="nflverse-draft-picks",
+            observed_at=datetime(2026, 1, 1, tzinfo=UTC),
+        ))
+        session.add_all([
+            TeamDraftingTendencyRecord(
+                team_id="team-1", draft_year=None, actor_type="gm", actor_id="gm-a",
+                tendency_type="trade_down", preference_score=100, confidence_score=20,
+                sample_size=1, source_name="historical-trade-analysis",
+                observed_at=datetime(2026, 1, 1, tzinfo=UTC),
+            ),
+            TeamDraftingTendencyRecord(
+                team_id="team-1", draft_year=None, actor_type="head_coach", actor_id="coach-a",
+                tendency_type="trade_down", preference_score=100, confidence_score=20,
+                sample_size=1, source_name="historical-trade-analysis",
+                observed_at=datetime(2026, 1, 1, tzinfo=UTC),
+            ),
+            TeamDraftingTendencyRecord(
+                team_id="team-1", draft_year=None, actor_type="gm", actor_id="gm-a",
+                tendency_type="trade_down", preference_score=100, confidence_score=20,
+                sample_size=1, source_name="manual",
+                observed_at=datetime(2026, 1, 1, tzinfo=UTC),
+            ),
+        ])
+        session.commit()
+        provider = Mock()
+        provider.load_draft_picks.return_value = []
+        service = DraftTradeHistoryIngestionService(session, NflverseDraftTradeHistoryProvider(provider))
+
+        assert service.refresh([2024]) == 0
+
+        assert session.query(TeamDraftingTendencyRecord).filter_by(
+            source_name="historical-trade-analysis", team_id="team-1", actor_id="gm-a"
+        ).count() == 0
+        assert session.query(TeamDraftingTendencyRecord).filter_by(
+            source_name="historical-trade-analysis", team_id="team-1", actor_id="coach-a"
+        ).count() == 0
+        assert session.query(TeamDraftingTendencyRecord).filter_by(
+            source_name="historical-trade-analysis", team_id="team-2",
+            actor_type="gm", actor_id="gm-a", tendency_type="trade_up", sample_size=1,
+        ).count() == 1
+        assert session.query(TeamDraftingTendencyRecord).filter_by(
+            source_name="historical-trade-analysis", team_id="team-2",
+            actor_type="head_coach", actor_id="coach-a", tendency_type="trade_up", sample_size=1,
+        ).count() == 1
+        assert session.query(TeamDraftingTendencyRecord).filter_by(source_name="manual").count() == 1
+
+
 def test_file_provider_reads_json_and_filters_seasons(tmp_path) -> None:
     """Normalized JSON exports should be usable without changing the engine."""
     history_file = tmp_path / "trades.json"

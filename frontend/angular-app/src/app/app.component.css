@@ -163,6 +163,20 @@ label,
   border-bottom: 1px solid #d7dfdb;
 }
 
+.prospect-notice {
+  margin-top: 16px;
+  padding: 12px 16px;
+  border: 1px solid #bfcac4;
+  color: #1d2a2d;
+  background: #fff;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.prospect-notice strong {
+  display: block;
+}
+
 .account-copy {
   display: grid;
   min-width: 245px;
