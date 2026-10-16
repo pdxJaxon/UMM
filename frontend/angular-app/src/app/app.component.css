@@ -279,12 +279,11 @@ label,
 }
 
 .workspace-header {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(260px, .9fr) minmax(0, 1.4fr);
   position: relative;
-  flex-wrap: wrap;
-  gap: 20px;
-  align-items: end;
-  justify-content: space-between;
+  gap: 16px 28px;
+  align-items: center;
   padding: 20px 0 24px;
 }
 
@@ -392,7 +391,6 @@ label,
 
 .team-identity {
   display: flex;
-  flex-basis: 100%;
   gap: 18px;
   align-items: center;
 }
@@ -446,13 +444,14 @@ label,
 }
 
 .subhead {
-  margin: 18px 0 0;
+  margin: 10px 0 0;
   color: #65716e;
   font-size: 16px;
 }
 
 .board-action {
   display: grid;
+  grid-column: 2;
   gap: 10px;
   justify-items: end;
   text-align: right;
@@ -972,7 +971,11 @@ label,
   }
 
   .team-identity {
-    margin-bottom: 26px;
+    margin-bottom: 16px;
+  }
+
+  .board-title {
+    margin-bottom: 16px;
   }
 
   .team-logo-wrap {
