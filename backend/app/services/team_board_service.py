@@ -22,6 +22,7 @@ from app.db.models import (
     TeamProspectMeetingRecord,
 )
 from app.services.draft_scoring import DraftScoreWeights, calculate_draft_score
+from app.services.prospect_pool import latest_projected_snapshot, pool_filter, snapshot_rankings
 
 
 def generate_team_board(
@@ -53,7 +54,7 @@ def generate_team_board(
         board_type=board_type,
         version=(previous_version or 0) + 1,
         generated_at=datetime.now(UTC),
-        scoring_version="draft-score-v1",
+        scoring_version="draft-score-v2-source-fallback",
         scoring_weights=weights.__dict__,
     )
     session.add(board)
@@ -83,7 +84,7 @@ def generate_team_board(
                 player_id=str(candidate["id"]),
                 rank_position=rank_position,
                 score=breakdown.final_score,
-                score_breakdown=breakdown.as_dict(),
+                score_breakdown={**breakdown.as_dict(), **candidate.get("source_provenance", {})},
             )
         )
     session.commit()
@@ -171,10 +172,12 @@ def generate_persisted_team_board(
     pick_number: int = 1,
 ) -> TeamBoardRecord:
     """Build a team board directly from persisted prospect and team signals."""
+    snapshot = latest_projected_snapshot(session, draft_year)
+    snapshot_id = snapshot.id if snapshot is not None else None
+    rankings = snapshot_rankings(session, snapshot_id)
     players = session.scalars(
         select(PlayerRecord).where(
-            PlayerRecord.draft_year == draft_year,
-            PlayerRecord.eligibility_status == "eligible",
+            pool_filter(draft_year, snapshot_id),
         )
     ).all()
     needs = _rows(session.scalars(select(TeamNeedRecord).where(TeamNeedRecord.team_id == team_id, TeamNeedRecord.draft_year == draft_year, TeamNeedRecord.is_active.is_(True))).all())
@@ -182,17 +185,31 @@ def generate_persisted_team_board(
     external_picks = _rows(session.scalars(select(ExternalMockPickRecord).where(ExternalMockPickRecord.draft_year == draft_year, ExternalMockPickRecord.team_id == team_id)).all())
     candidates = []
     for player in players:
+        ranking = rankings.get(player.id)
+        source_evaluation = (
+            100.0 * (snapshot.prospect_count - ranking.overall_rank + 1) / snapshot.prospect_count
+            if snapshot is not None and ranking is not None else None
+        )
         measurements = session.scalars(
             select(PlayerMeasurementRecord).where(PlayerMeasurementRecord.player_id == player.id).order_by(PlayerMeasurementRecord.observed_at.desc()).limit(1)
         ).first()
         scores = session.scalars(select(PlayerAthleticScoreRecord).where(PlayerAthleticScoreRecord.player_id == player.id)).all()
+        ranking_values = _ranking_values(scores)
         concerns = session.scalars(select(PlayerDerogatoryConcernRecord).where(PlayerDerogatoryConcernRecord.player_id == player.id)).all()
         meetings = session.scalars(select(TeamProspectMeetingRecord).where(TeamProspectMeetingRecord.team_id == team_id, TeamProspectMeetingRecord.player_id == player.id, TeamProspectMeetingRecord.draft_year == draft_year, TeamProspectMeetingRecord.is_active.is_(True))).all()
         candidates.append({
             "id": player.id,
             "position": player.position,
             "college_id": player.college_id,
-            "ranking_values": _ranking_values(scores),
+            "ranking_values": ranking_values,
+            "source_evaluation": source_evaluation,
+            "source_provenance": {
+                "source_rank": ranking.overall_rank,
+                "source_snapshot_id": snapshot.id,
+                "source_name": snapshot.source_name,
+                "source_evaluation": source_evaluation,
+                "evaluation_basis": "stored_signals" if ranking_values else "source_rank_percentile",
+            } if ranking is not None and snapshot is not None else {},
             "measurements": _measurement_values(measurements),
             "team_needs": needs,
             "tendencies": tendencies,
