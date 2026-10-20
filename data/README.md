@@ -245,7 +245,31 @@ each default board is committed independently. A generation error is reported
 explicitly and may leave some new default versions already created. After fixing
 the error, rerunning preserves approval and creates additional default versions.
 
-### Identity, eligibility, and existing boards
+### Copy a default board into a personal board
+
+After approving the desired source snapshot and generating defaults, sign in,
+select your team, and open **Default board**. Choose **Copy to My board** to
+create an editable personal copy of that team's persisted prospects, ranks,
+scores, and source evidence. There is no placeholder-prospect fallback.
+The new personal board loads immediately; use arrows or drag-and-drop to
+reorder prospects, then **Save changes**. Switching away and back to **My board**
+reloads the saved order without altering the default.
+
+If a personal board already exists, copying requires explicit confirmation.
+**Keep existing board** cancels without writing. **Replace My board with default**
+creates a newer personal-board version from the latest default; the previous
+copy remains stored but is no longer the active version. This replaces the
+current custom order, not other teams' boards or other users' work.
+Inactive default entries are not reactivated in the copy; an empty default must
+be regenerated before copying.
+
+API clients use `POST /api/teams/{team_id}/board/copy?draft_year=2027`.
+An existing personal board returns HTTP 409 without changes. Only after user
+confirmation should clients retry with `&replace_existing=true`.
+Copying does not itself approve imports or regenerate defaults. A later import
+or default regeneration never silently replaces a user's personal board.
+
+### Identity and eligibility safeguards
 
 - Imports reuse stable prospect IDs and append dated rankings. Existing profiles,
   eligibility, draft references, and personal board entries/order are preserved.

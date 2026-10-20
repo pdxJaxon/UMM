@@ -82,15 +82,21 @@
       </div>
     </section>
 
+    <section *ngIf="confirmingBoardCopy" class="control-strip" aria-label="Replace personal board" role="region">
+      <p>You already have a personal board for {{ selectedTeamName }}. Copying the default will replace your current custom order with a fresh editable copy. Other teams and users are unaffected.</p>
+      <button class="action primary" (click)="copyBoard(true)">Replace My board with default</button>
+      <button class="action" (click)="cancelBoardCopy()">Keep existing board</button>
+    </section>
+
     <section class="control-strip" aria-label="Board controls">
       <label>TEAM
-        <select [(ngModel)]="selectedTeamId" (ngModelChange)="onTeamChange()" [disabled]="!!draftId">
+        <select [(ngModel)]="selectedTeamId" (ngModelChange)="onTeamChange()" [disabled]="!!draftId || loading">
           <option *ngFor="let team of teams" [value]="team.id">{{ team.name }}</option>
         </select>
       </label>
       <div class="segmented">
-        <button [class.active]="boardMode === 'default'" (click)="setBoardMode('default')" [disabled]="!!draftId">Default board</button>
-        <button [class.active]="boardMode === 'personal'" (click)="setBoardMode('personal')" [disabled]="!!draftId">My board</button>
+        <button [class.active]="boardMode === 'default'" (click)="setBoardMode('default')" [disabled]="!!draftId || loading">Default board</button>
+        <button [class.active]="boardMode === 'personal'" (click)="setBoardMode('personal')" [disabled]="!!draftId || loading">My board</button>
       </div>
       <span class="status"><span class="status-dot"></span> {{ syncLabel }}</span>
     </section>
@@ -113,7 +119,7 @@
         <small>Team profile plus your override for this mock draft</small>
       </label>
       <div class="randomness-action">
-        <button class="action primary" (click)="startMockDraft()" [disabled]="startingDraft || !!draftId || !selectedTeamId">
+        <button class="action primary" (click)="startMockDraft()" [disabled]="startingDraft || !!draftId || !selectedTeamId || loading || confirmingBoardCopy">
           {{ startingDraft ? 'Starting...' : draftId ? 'Draft in progress' : 'Start mock draft' }}
         </button>
         <span *ngIf="draftRunMessage" class="preference-status">{{ draftRunMessage }}</span>
@@ -220,8 +226,8 @@
 
         <div *ngIf="error" class="api-error">
           <span>{{ error }}</span>
-          <button *ngIf="boardMode === 'default' && isAuthenticated" class="text-button" (click)="generateBoard()">Generate board</button>
-          <button *ngIf="boardMode === 'personal' && isAuthenticated" class="text-button" (click)="setBoardMode('default')">View default board</button>
+          <button *ngIf="boardMode === 'default' && isAuthenticated" class="text-button" (click)="generateBoard()" [disabled]="loading || !!draftId || confirmingBoardCopy">Generate board</button>
+          <button *ngIf="boardMode === 'personal' && isAuthenticated" class="text-button" (click)="setBoardMode('default')" [disabled]="loading || !!draftId">View default board</button>
         </div>
         <div *ngIf="loading" class="api-loading">Loading board…</div>
 

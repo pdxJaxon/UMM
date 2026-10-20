@@ -249,14 +249,24 @@ class BoardOrderRequest(BaseModel):
 def copy_team_board_endpoint(
     team_id: str,
     draft_year: int,
+    replace_existing: bool = False,
     current_user: UserRecord = Depends(get_current_user),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
     """Copy the latest default board into the authenticated user's workspace."""
+    existing = get_latest_board(session, team_id, draft_year, board_type="personal", user_id=current_user.id)
+    if existing is not None and not replace_existing:
+        raise HTTPException(
+            status_code=409,
+            detail="You already have a personal board for this team. Confirm replacement to copy the default.",
+        )
     source_board = get_latest_team_board(session, team_id, draft_year)
     if source_board is None:
         raise HTTPException(status_code=404, detail="Default team board has not been generated")
-    board = copy_board_for_user(session, source_board, current_user.id)
+    try:
+        board = copy_board_for_user(session, source_board, current_user.id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"board_id": board.id, "team_id": board.team_id, "draft_year": board.draft_year, "version": board.version}
 
 

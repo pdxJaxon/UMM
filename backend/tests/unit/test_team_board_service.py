@@ -4,7 +4,9 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 from app.db.session import Base
-from app.services.team_board_service import generate_team_board, get_latest_board, get_latest_team_board
+import pytest
+
+from app.services.team_board_service import copy_board_for_user, generate_team_board, get_latest_board, get_latest_team_board
 
 
 def test_generate_team_board_ranks_candidates_and_versions_boards() -> None:
@@ -43,3 +45,24 @@ def test_get_latest_board_can_return_personal_board() -> None:
         assert latest is not None
         assert latest.id == personal.id
         assert latest.board_type == "personal"
+
+
+def test_copy_ignores_inactive_entries_and_rejects_empty_or_personal_sources():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        source = generate_team_board(session, "team-1", 2027, [
+            {"id": "inactive", "position": "QB", "ranking_values": {"pff": 90}},
+            {"id": "active", "position": "WR", "ranking_values": {"pff": 80}},
+        ])
+        source.entries[0].is_active = False
+        session.commit()
+        copied = copy_board_for_user(session, source, "user")
+        assert [(entry.player_id, entry.rank_position) for entry in copied.entries] == [("active", 1)]
+        with pytest.raises(ValueError, match="Only a default"):
+            copy_board_for_user(session, copied, "other-user")
+        source.entries[1].is_active = False
+        session.commit()
+        with pytest.raises(ValueError, match="no active prospects"):
+            copy_board_for_user(session, source, "user")
+        assert session.query(type(source)).count() == 2

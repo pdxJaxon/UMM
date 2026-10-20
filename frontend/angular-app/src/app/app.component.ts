@@ -179,6 +179,7 @@ export class AppComponent implements OnInit {
   protected saved = false;
   protected entries: BoardEntry[] = [];
   protected loading = false;
+  protected confirmingBoardCopy = false;
   protected error: string | null = null;
   protected authMessage: string | null = null;
   protected signedInEmail = '';
@@ -214,6 +215,7 @@ export class AppComponent implements OnInit {
   private accessToken = '';
   private authSession = 0;
   private boardId: number | null = null;
+  private boardRequest = 0;
   private readonly draftYear = 2027;
 
   constructor(private readonly http: HttpClient) {}
@@ -337,6 +339,7 @@ export class AppComponent implements OnInit {
   }
 
   protected get boardActionEnabled(): boolean {
+    if (this.loading || this.confirmingBoardCopy) return false;
     if (this.boardMode === 'personal') {
       return this.canSaveBoard;
     }
@@ -362,13 +365,18 @@ export class AppComponent implements OnInit {
   }
 
   protected loadBoard(): void {
+    const request = ++this.boardRequest;
+    this.confirmingBoardCopy = false;
+    this.saved = false;
     if (!this.selectedTeamId) {
+      this.loading = false;
       this.entries = [];
       this.activeEntry = null;
       return;
     }
 
     if (this.boardMode === 'personal' && !this.isAuthenticated) {
+      this.loading = false;
       this.entries = [];
       this.activeEntry = null;
       this.error = 'Sign in to load or save your personal board.';
@@ -385,6 +393,7 @@ export class AppComponent implements OnInit {
       )
       .subscribe({
         next: (response) => {
+          if (request !== this.boardRequest) return;
           this.boardId = response.board?.id ?? null;
           this.boardVersion = response.board?.version ?? null;
           this.entries = this.mapEntries(response.entries ?? []);
@@ -397,6 +406,7 @@ export class AppComponent implements OnInit {
           }
         },
         error: (error: HttpErrorResponse) => {
+          if (request !== this.boardRequest) return;
           this.loading = false;
           this.entries = [];
           this.activeEntry = null;
@@ -467,29 +477,43 @@ export class AppComponent implements OnInit {
     });
   }
 
-  protected copyBoard(): void {
+  protected copyBoard(replaceExisting = false): void {
+    if (this.loading || this.draftId || !this.selectedTeamId) return;
+    if (replaceExisting && !this.confirmingBoardCopy) return;
     if (!this.ensureAuthenticated('Sign in before copying a personal board.')) {
       return;
     }
+    const request = ++this.boardRequest;
+    this.confirmingBoardCopy = false;
     this.loading = true;
     this.error = null;
     this.http.post<{ board_id: number; version: number }>(
-      `${this.apiBase}/api/teams/${this.selectedTeamId}/board/copy?draft_year=${this.draftYear}`,
+      `${this.apiBase}/api/teams/${this.selectedTeamId}/board/copy?draft_year=${this.draftYear}&replace_existing=${replaceExisting}`,
       {},
       this.requestOptions(true)
     ).subscribe({
       next: (response) => {
+        if (request !== this.boardRequest) return;
         this.boardMode = 'personal';
         this.boardId = response.board_id;
         this.boardVersion = response.version;
-        this.authMessage = 'Personal board ready.';
+        this.authMessage = 'Default prospects copied to your personal board.';
         this.loadBoard();
       },
       error: (error: HttpErrorResponse) => {
+        if (request !== this.boardRequest) return;
         this.loading = false;
+        if (error.status === 409 && !replaceExisting) {
+          this.confirmingBoardCopy = true;
+          return;
+        }
         this.error = this.describeApiError(error, 'Unable to copy the default board.');
       }
     });
+  }
+
+  protected cancelBoardCopy(): void {
+    this.confirmingBoardCopy = false;
   }
 
   protected selectEntry(entry: BoardEntry): void {
