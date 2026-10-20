@@ -210,6 +210,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
   protected recommendation: DraftRecommendation | null = null;
   protected recommendationLoading = false;
   protected recommendationError: string | null = null;
+  protected recommendationNotice: string | null = null;
   private recommendationRequest = 0;
   private draftAdvanceRequest = 0;
   private draftPickTimer: ReturnType<typeof setTimeout> | null = null;
@@ -827,6 +828,10 @@ this.activeEntry = null;
       error: (error: HttpErrorResponse) => {
         if (request !== this.recommendationRequest || authSession !== this.authSession) return;
         this.recommendationLoading = false;
+        if (error.status === 503 && error.error?.detail?.code === 'recommendation_not_configured') {
+          this.recommendationNotice = 'AI recommendations are not enabled yet. You can still select a prospect and make your pick.';
+          return;
+        }
         this.recommendationError = this.describeApiError(error, 'Unable to load the AI recommendation. You can still choose your own prospect.');
       }
     });
@@ -843,6 +848,7 @@ this.activeEntry = null;
     this.recommendationRequest += 1;
     this.recommendation = null;
     this.recommendationError = null;
+    this.recommendationNotice = null;
     this.recommendationLoading = false;
   }
 

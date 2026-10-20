@@ -666,7 +666,7 @@ label,
 
 .draft-pick-list li {
   display: grid;
-  grid-template-columns: 38px minmax(120px, .9fr) minmax(120px, 1.3fr) auto;
+  grid-template-columns: 38px minmax(120px, .9fr) minmax(120px, 1.3fr);
   gap: 12px;
   align-items: center;
   min-height: 44px;
@@ -696,12 +696,6 @@ label,
   gap: 6px;
   margin: 4px 0;
   font-size: 11px;
-}
-
-.draft-pick-source {
-  color: #65716e;
-  font: 700 9px "Courier New", monospace;
-  text-transform: uppercase;
 }
 
 .draft-trade-note {
@@ -1100,7 +1094,7 @@ label,
   }
 
   .draft-pick-list li {
-    grid-template-columns: 30px minmax(0, 1fr) auto;
+    grid-template-columns: 30px minmax(0, 1fr);
     gap: 8px;
     padding: 8px 0;
   }
@@ -1112,11 +1106,6 @@ label,
   .draft-player {
     grid-column: 2;
     grid-row: 2;
-  }
-
-  .draft-pick-source {
-    grid-column: 3;
-    grid-row: 1 / span 2;
   }
 
   .evidence-panel {

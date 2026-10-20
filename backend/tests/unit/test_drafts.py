@@ -356,6 +356,33 @@ def test_prediction_endpoint_requires_configured_llm(isolate_draft_store: Sessio
     assert response.status_code == 503
 
 
+def test_unconfigured_recommendation_is_optional_and_manual_pick_still_works(monkeypatch) -> None:
+    from app.services.llm_prediction import OpenAICompatiblePredictionProvider
+
+    provider = OpenAICompatiblePredictionProvider(api_key="")
+    monkeypatch.setattr("app.api.drafts.OpenAICompatiblePredictionProvider", lambda: provider)
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {create_access_token('user-1')}"}
+    created = client.post(
+        "/api/drafts", headers=headers,
+        json={"controlled_team_id": "team-1", "draft_year": 2026},
+    ).json()
+    draft_id = created["draft_run_id"]
+    result = client.post(f"/api/drafts/{draft_id}/recommendation", headers=headers)
+    assert result.status_code == 503
+    assert result.json()["detail"]["code"] == "recommendation_not_configured"
+    assert "make your pick" in result.json()["detail"]["message"]
+    assert "LLM_API_KEY" not in result.text
+    assert provider.client.is_closed
+    assert client.get(f"/api/drafts/{draft_id}", headers=headers).json()["picks"] == []
+    picked = client.post(
+        f"/api/drafts/{draft_id}/picks", headers=headers,
+        json={"team_id": "team-1", "player_id": created["eligible_players"][0]["player_id"]},
+    )
+    assert picked.status_code == 201
+    assert len(picked.json()["picks"]) == 1
+
+
 @pytest.mark.parametrize("candidate_id", ["player-1", "missing-player", "wrong-year", "unconfirmed"])
 def test_prediction_endpoint_rejects_candidates_outside_available_draft_pool(
     isolate_draft_store: Session, monkeypatch, candidate_id: str,

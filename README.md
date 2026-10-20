@@ -86,6 +86,9 @@ team, and current pick and are discarded when that state changes.
 
 Configure `LLM_API_KEY` in the backend environment to enable the existing
 OpenAI-compatible provider; `LLM_API_URL` and `LLM_MODEL` select the service/model.
+Without a configured key, the draft room shows an informational notice that AI
+recommendations are not enabled, rather than an error or a nonfunctional retry.
+Manual drafting remains available; no substitute AI recommendation is generated.
 Provider failure is shown explicitly with a recommendation retry action, not
 silently replaced by another engine. Manual selection remains available.
 Selecting the recommendation or an alternative only fills the pick selector:
@@ -104,6 +107,7 @@ at round completion. Failures stop advancement and expose **Retry advance**;
 signing out or leaving the app cancels pending timers. The pick log and recap
 show each prospect's position, college name, and college logo when available.
 A failed logo is hidden without removing the college name.
+Internal selection-source labels are not displayed in the log or recap.
 The log follows each new selection; scrolling between selections is preserved
 until the next pick arrives.
 
