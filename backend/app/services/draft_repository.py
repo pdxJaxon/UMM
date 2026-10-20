@@ -184,11 +184,16 @@ class DraftRepository:
         self.session.flush()
         return pick
 
-    def auto_simulate(self, draft: DraftRunRecord) -> None:
-        """Select available players until the controlled team is on the clock."""
+    def auto_simulate(self, draft: DraftRunRecord, *, max_picks: int | None = None) -> None:
+        """Select up to the requested count, stopping for the controlled team."""
+        if max_picks is not None and max_picks < 1:
+            raise ValueError("Maximum picks must be positive")
         picks = self._ordered_picks(draft.id)
+        starting_count = len(picks)
         tendency_cache: dict[str, list[dict[str, object]]] = {}
         while draft.status != "completed" and self.current_team_id(len(picks), self._draft_order(draft)) != draft.controlled_team_id:
+            if max_picks is not None and len(picks) - starting_count >= max_picks:
+                break
             selected = {pick.player_id for pick in picks}
             pick_index = len(picks)
             self._maybe_execute_trade(draft, pick_index, tendency_cache)

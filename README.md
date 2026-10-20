@@ -97,6 +97,21 @@ shown separately. Confidence and explanations are model output, not verified
 scouting facts. Completed rounds remain visible as a first-round recap until
 you choose **Close draft**.
 
+Automated picks are saved and shown one at a time, with a 2.5-second pause
+after each visible pick before requesting the next selection (server latency
+can make the interval longer). The draft pauses for your team's turn and stops
+at round completion. Failures stop advancement and expose **Retry advance**;
+signing out or leaving the app cancels pending timers. The pick log and recap
+show each prospect's position, college name, and college logo when available.
+A failed logo is hidden without removing the college name.
+The log follows each new selection; scrolling between selections is preserved
+until the next pick arrives.
+
+The UI calls `POST /api/drafts/{id}/auto-simulate?max_picks=1` for paced
+advancement. API clients that omit `max_picks` retain the existing bulk behavior
+of advancing to the controlled team or round completion; there is no server-side
+sleep or long-held request between picks.
+
 ### Verification
 
 From `frontend\angular-app`, run `npm run test:unit` for component state tests and
