@@ -126,14 +126,19 @@ reviewed should you record `DATA_UPDATED_ON` and restart the API.
 The import never advances the homepage's full-refresh date automatically.
 Projection status is not a claim that the eventual NFL order is known.
 
-## Consensus CSV imports and projected pools
+## PFF CSV imports and projected pools
+
+The authorized PFF export is the candidate-list source going forward. The old
+consensus adapter remains available only for historical/manual compatibility.
+Do not run the legacy NFLverse prospect-refresh job as a replacement for this
+inbox workflow: detailed prospect enrichment is separate.
 
 Importing rankings and approving them for simulation are separate operations.
 Only members of an explicitly approved snapshot become available as projected
 prospects. Approval does not confirm eligibility or declaration.
 
 Before updating an existing database, take a backup. For PostgreSQL, apply
-migrations through `022_add_projected_prospect_pool.sql` using the deployment
+migrations through `023_add_league_data_refreshes.sql` using the deployment
 migration process. For local SQLite, run the schema-only upgrade from `backend`
 to preserve existing reference data:
 
@@ -142,17 +147,90 @@ Set-Location C:\Users\s008919\git\UMM\backend
 ..\.venv\Scripts\python.exe -c "from app.db.initialize import initialize_schema; initialize_schema()"
 ```
 
-The CSV must have `Rank,Player Name,Position,College` headers, unique consecutive
-ranks starting at 1, and unique name/school identities. The adapter maps `DL` to
-`DT` while retaining the source position. Keep source files in the ignored
-`data\prospects` directory.
+The CSV must have exactly
+`Rank,Player,Position,School,PFF Grade,Analysis` headers in that order, unique
+consecutive ranks starting at 1, and unique name/school identities. Standard CSV
+quoting, UTF-8 BOMs, commas, and multiline analysis fields are supported.
+Grades can be blank; supplied grades must be finite numbers from 0 to 100.
+PFF grades are stored as source snapshot evidence, not athletic measurements or
+UMM scoring inputs. Narrative `Analysis` is not imported or used for enrichment.
+Profiles, measurements, and detailed scouting information require other sources.
 
-Preview the selected top 150, then import them:
+Keep exports in the ignored `data\prospects` directory, named
+`pff-my-big-board-YYYY-MM-DD.csv`. Use one inbox per draft year: the file does not
+contain a draft-year column, so the operator must verify the year and pass it
+explicitly. The date is the export's source date, not a filesystem timestamp.
+Copy to a temporary filename outside the matching pattern and rename only when
+the file is complete. The job reads and validates the newest dated file only;
+it never falls back to older data when the newest input is invalid.
+
+From `backend`, preview the inbox, then import:
 
 ```powershell
-..\.venv\Scripts\python.exe -m app.jobs.import_consensus_csv --csv ..\data\prospects\consensus-big-board-2027-20261015.csv --draft-year 2027 --snapshot-date 2026-10-15 --limit 150
-..\.venv\Scripts\python.exe -m app.jobs.import_consensus_csv --csv ..\data\prospects\consensus-big-board-2027-20261015.csv --draft-year 2027 --snapshot-date 2026-10-15 --limit 150 --commit
+..\.venv\Scripts\python.exe -m app.jobs.import_pff_csv --directory ..\data\prospects --draft-year 2027
+..\.venv\Scripts\python.exe -m app.jobs.import_pff_csv --directory ..\data\prospects --draft-year 2027 --commit
 ```
+
+The default minimum is 150 candidates to reject truncated files. All rows are
+imported, not just the first 150. Change `--min-prospects` only after reviewing an
+intentional scope change. For an explicitly chosen file instead, use
+`--csv PATH --snapshot-date YYYY-MM-DD` without `--directory`.
+
+Reprocessing identical dated candidate data is a no-op. Older snapshots are
+skipped. Changed data for an already imported date is rejected for manual
+correction review. A later date with unchanged candidates is still a new dated
+snapshot. Changing only narrative analysis does not create another snapshot.
+Missing/empty inboxes, future dates, malformed CSVs, unmapped schools/positions,
+and unresolved identities are explicit failures with a nonzero exit code.
+Imports never delete omitted players, approve a pool, regenerate default boards,
+or advance `DATA_UPDATED_ON`.
+
+Identity conflicts require a reviewed JSON object mapping source keys to existing
+player IDs via `--identity-map PATH`. This preserves stored profiles and records
+the export's school/position on its ranking rows. Do not automatically accept
+school changes or fuzzy name matches. Keep database-specific maps local, not in
+Git. Review maps if a previously overridden prospect disappears from the file.
+
+### Nightly local job
+
+From the repository root, the PowerShell wrapper defaults to preview:
+
+```powershell
+.\scripts\import-pff-prospects.ps1 -DraftYear 2027
+.\scripts\import-pff-prospects.ps1 -DraftYear 2027 -Commit
+```
+
+It uses the project's `.venv` and the absolute inbox path, so Task Scheduler's
+working directory does not affect the database or input selection. If present,
+`data\prospects\pff-identity-map-2027.json` is used automatically; alternatively
+pass `-IdentityMap PATH`. A direct Python CLI invocation requires the explicit
+`--identity-map` argument when overrides are needed.
+
+Register the nightly task explicitly (default: 02:00 local machine time):
+
+```powershell
+.\scripts\register-pff-nightly.ps1 -DraftYear 2027 -At '02:00'
+Get-ScheduledTaskInfo -TaskName 'UMM-PFF-Candidate-Import'
+```
+
+Registration does not overwrite an existing named task. It uses the current
+Windows account's default interactive task context: keep that account signed in
+and the machine available. Overlapping task invocations are ignored; missed runs
+start when available. For unattended execution while logged out, configure a
+dedicated scheduler account and database access separately; never put credentials
+in scripts. Check Task Scheduler's last result/history for nonzero failures
+and timestamped transcripts in `data\prospects\import-logs` for details.
+These local logs include import reports and should be retained/rotated according
+to your operational needs. A scheduled
+run imports candidates only; simulation approval remains a deliberate review.
+No GitHub cron is used because hosted runners cannot see this local ignored inbox
+or the local SQLite database.
+The task runs code from this checkout. Merge the ingestion changes before
+switching this checkout to a branch that lacks the new job/scripts, or disable
+the task first. Re-register for the next draft year only after changing inboxes
+and reviewing the candidate year.
+
+### Approve a reviewed candidate pool
 
 The report returns a `snapshot_id`. Use that exact ID to preview approval, then
 approve and generate fresh default boards for all teams:
@@ -189,7 +267,7 @@ the error, rerunning preserves approval and creates additional default versions.
 
 ### Source ranks versus UMM scores
 
-Consensus rank is displayed separately from the team-adjusted UMM score. When
+Source rank is displayed separately from the team-adjusted UMM score. When
 stored evaluation signals exist, they take precedence. Otherwise, an approved
 snapshot supplies a transparent fallback evaluation:
 

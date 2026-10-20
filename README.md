@@ -4,6 +4,10 @@ Reviewed, year-specific team-needs and projected-order refreshes are documented
 in [the data workflow](data/README.md#reviewed-team-needs-and-projected-draft-order).
 The pilot models one first-round pick per team, not traded pick ownership.
 
+Candidate ingestion now accepts authorized dated PFF CSV exports. See the
+[PFF import and nightly-job workflow](data/README.md#pff-csv-imports-and-projected-pools);
+simulation-pool approval and detailed prospect enrichment remain separate.
+
 ## Run locally on Windows
 
 ### Prerequisites
