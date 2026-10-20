@@ -102,6 +102,61 @@ def test_controlled_team_flow_auto_simulates_other_teams() -> None:
     assert response.json()["picks"][1]["selection_source"] == "USER"
 
 
+def test_bounded_simulation_saves_one_pick_per_call_and_stops_for_user():
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {create_access_token('user-1')}"}
+    created = client.post("/api/drafts", headers=headers, json={
+        "controlled_team_id": "team-3", "draft_year": 2026,
+    })
+    draft_id = created.json()["draft_run_id"]
+    url = f"/api/drafts/{draft_id}/auto-simulate?max_picks=1"
+    for count in (1, 2):
+        response = client.post(url, headers=headers)
+        assert response.status_code == 200
+        assert len(response.json()["picks"]) == count
+        persisted = client.get(f"/api/drafts/{draft_id}", headers=headers)
+        assert persisted.json()["picks"] == response.json()["picks"]
+    state = client.post(url, headers=headers).json()
+    assert len(state["picks"]) == 2
+    assert state["current_team_id"] == "team-3"
+    for invalid in (0, -1, 33):
+        assert client.post(
+            f"/api/drafts/{draft_id}/auto-simulate?max_picks={invalid}", headers=headers,
+        ).status_code == 422
+    assert len(client.get(f"/api/drafts/{draft_id}", headers=headers).json()["picks"]) == 2
+
+
+def test_repository_rejects_nonpositive_pick_limit(isolate_draft_store):
+    repository = DraftRepository(isolate_draft_store)
+    draft = repository.create("user-1", "team-3", 2026)
+    with pytest.raises(ValueError, match="positive"):
+        repository.auto_simulate(draft, max_picks=0)
+
+
+def test_single_pick_advancement_completes_round_without_duplicates():
+    client = TestClient(app)
+    headers = {"Authorization": f"Bearer {create_access_token('user-1')}"}
+    created = client.post("/api/drafts", headers=headers, json={
+        "controlled_team_id": "team-1", "draft_year": 2026,
+    }).json()
+    draft_id = created["draft_run_id"]
+    response = client.post(
+        f"/api/drafts/{draft_id}/picks", headers=headers,
+        json={"team_id": "team-1", "player_id": created["eligible_players"][0]["player_id"]},
+    )
+    assert response.status_code == 201
+    for count in range(2, 33):
+        response = client.post(f"/api/drafts/{draft_id}/auto-simulate?max_picks=1", headers=headers)
+        assert response.status_code == 200
+        assert len(response.json()["picks"]) == count
+    state = response.json()
+    assert state["draft_run"]["status"] == "completed"
+    assert len({pick["player_id"] for pick in state["picks"]}) == 32
+    assert client.post(
+        f"/api/drafts/{draft_id}/auto-simulate?max_picks=1", headers=headers,
+    ).json()["picks"] == state["picks"]
+
+
 def test_draft_uses_seeded_team_order_and_all_persisted_prospects(isolate_draft_store: Session) -> None:
     """Draft order and valid picks should come from persisted league data, not fixtures."""
     repository = DraftRepository(isolate_draft_store)

@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, OnInit } from '@angular/core';
+import { AfterViewChecked, Component, ElementRef, OnDestroy, OnInit, ViewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpClientModule, HttpErrorResponse } from '@angular/common/http';
 
@@ -170,7 +170,9 @@ interface DraftRecommendation {
   templateUrl: './app.component.html',
   styleUrl: './app.component.css'
 })
-export class AppComponent implements OnInit {
+export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
+  @ViewChild('draftPickList') private draftPickList?: ElementRef<HTMLOListElement>;
+  private visiblePickCount = 0;
   protected teams: TeamOption[] = [];
   protected selectedTeamId = '';
   protected boardMode: 'default' | 'personal' = 'default';
@@ -209,6 +211,9 @@ export class AppComponent implements OnInit {
   protected recommendationLoading = false;
   protected recommendationError: string | null = null;
   private recommendationRequest = 0;
+  private draftAdvanceRequest = 0;
+  private draftPickTimer: ReturnType<typeof setTimeout> | null = null;
+  private readonly draftPickDelayMs = 2500;
   private draggedPlayerId: string | null = null;
 
   private readonly apiBase = 'http://localhost:8000';
@@ -219,6 +224,21 @@ export class AppComponent implements OnInit {
   private readonly draftYear = 2027;
 
   constructor(private readonly http: HttpClient) {}
+
+  ngAfterViewChecked(): void {
+    const count = this.draftState?.picks.length ?? 0;
+    if (count !== this.visiblePickCount && this.draftPickList) {
+      const list = this.draftPickList.nativeElement;
+      list.scrollTop = list.scrollHeight;
+    }
+    this.visiblePickCount = count;
+  }
+
+  ngOnDestroy(): void {
+    this.cancelDraftAdvance();
+    this.clearRecommendation();
+    this.authSession += 1;
+  }
 
   ngOnInit(): void {
     this.http.get<DataStatusResponse>(`${this.apiBase}/api/data/status`).subscribe({
@@ -547,6 +567,7 @@ export class AppComponent implements OnInit {
   }
 
   protected logout(): void {
+    this.cancelDraftAdvance();
     this.clearRecommendation();
     this.authSession += 1;
     this.accessToken = '';
@@ -674,7 +695,7 @@ this.activeEntry = null;
       next: (updatedState) => {
         if (authSession !== this.authSession) return;
         this.setDraftState(updatedState);
-        this.advanceDraft(updatedState.draft_run.id);
+        this.continueDraft(updatedState);
       },
       error: (error: HttpErrorResponse) => {
         if (authSession !== this.authSession) return;
@@ -693,6 +714,7 @@ this.activeEntry = null;
 
   protected closeDraft(): void {
     if (this.draftState?.draft_run.status !== 'completed') return;
+    this.cancelDraftAdvance();
     this.clearRecommendation();
     this.draftState = null;
     this.draftEntries = [];
@@ -706,24 +728,55 @@ this.activeEntry = null;
     return this.draftEntries.find((entry) => entry.player_id === playerId)?.name ?? playerId;
   }
 
+  protected draftPlayerDetails(playerId: string): BoardEntry | undefined {
+    return this.draftEntries.find((entry) => entry.player_id === playerId);
+  }
+
+  private cancelDraftAdvance(): void {
+    this.draftAdvanceRequest += 1;
+    if (this.draftPickTimer !== null) {
+      clearTimeout(this.draftPickTimer);
+      this.draftPickTimer = null;
+    }
+  }
+
+  private continueDraft(state: DraftStateResponse): void {
+    this.draftBusy = false;
+    if (state.draft_run.status === 'completed') return;
+    if (state.current_team_id === state.draft_run.controlled_team_id) {
+      this.loadRecommendation();
+      return;
+    }
+    this.draftBusy = true;
+    const request = this.draftAdvanceRequest;
+    const authSession = this.authSession;
+    this.draftPickTimer = setTimeout(() => {
+      this.draftPickTimer = null;
+      if (request !== this.draftAdvanceRequest || authSession !== this.authSession
+        || this.draftId !== state.draft_run.id) return;
+      this.advanceDraft(state.draft_run.id);
+    }, this.draftPickDelayMs);
+  }
+
   private advanceDraft(draftId: string): void {
+    this.cancelDraftAdvance();
     this.clearRecommendation();
     this.draftBusy = true;
     this.draftError = null;
     const authSession = this.authSession;
+    const request = this.draftAdvanceRequest;
     this.http.post<DraftStateResponse>(
-      `${this.apiBase}/api/drafts/${draftId}/auto-simulate`,
+      `${this.apiBase}/api/drafts/${draftId}/auto-simulate?max_picks=1`,
       {},
       this.requestOptions(true)
     ).subscribe({
       next: (state) => {
-        if (authSession !== this.authSession) return;
+        if (authSession !== this.authSession || request !== this.draftAdvanceRequest) return;
         this.setDraftState(state);
-        this.draftBusy = false;
-        this.loadRecommendation();
+        this.continueDraft(state);
       },
       error: (error: HttpErrorResponse) => {
-        if (authSession !== this.authSession) return;
+        if (authSession !== this.authSession || request !== this.draftAdvanceRequest) return;
         this.draftBusy = false;
         this.draftError = this.describeApiError(error, 'Unable to advance the draft.');
       }
@@ -919,6 +972,10 @@ this.activeEntry = null;
       .filter((entry) => playersById.has(entry.player_id))
       .map((entry, index) => ({
         ...entry, rank: index + 1, source: 'Draft board',
+        position: playersById.get(entry.player_id)?.position || entry.position,
+        school: playersById.get(entry.player_id)?.college_name
+          ?? playersById.get(entry.player_id)?.college_abbreviation ?? entry.school,
+        schoolLogoUrl: playersById.get(entry.player_id)?.college_logo_url ?? entry.schoolLogoUrl,
         projected: playersById.get(entry.player_id)?.is_projected ?? false,
         sourceRank: playersById.get(entry.player_id)?.source_rank ?? null
       }));

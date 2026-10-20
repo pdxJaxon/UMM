@@ -144,7 +144,7 @@
         <button *ngIf="draft.draft_run.status === 'drafting'" class="text-button" (click)="simulateToUserPick()" [disabled]="draftBusy">Retry advance</button>
       </p>
 
-      <div *ngIf="draftBusy" class="draft-status" role="status" aria-live="polite">Updating the draft board…</div>
+      <div *ngIf="draftBusy" class="draft-status" role="status" aria-live="polite">Draft in progress. Automated picks arrive one at a time, at least 2.5 seconds apart.</div>
 
       <section *ngIf="draftOnControlledTeam" class="recommendation-panel" aria-label="Engine recommendation" aria-live="polite">
         <p class="eyebrow">ENGINE RECOMMENDATION / ADVISORY ONLY</p>
@@ -191,11 +191,18 @@
         <h3>{{ draft.draft_run.status === 'completed' ? 'First-round recap' : 'Pick log' }}</h3>
         <span>{{ draft.picks.length }} picks</span>
       </div>
-      <ol class="draft-pick-list">
+      <ol #draftPickList class="draft-pick-list">
         <li *ngFor="let pick of draft.picks">
           <span class="draft-pick-number">{{ pick.pick_number | number:'2.0-0' }}</span>
           <strong>{{ teamName(pick.team_id) }}</strong>
-          <span class="draft-player">{{ draftPlayerName(pick.player_id) }}</span>
+          <span class="draft-player">
+            <span>{{ draftPlayerName(pick.player_id) }}</span>
+            <span *ngIf="draftPlayerDetails(pick.player_id) as player" class="draft-player-meta">
+              <b>{{ player.position }}</b>
+              <img *ngIf="player.schoolLogoUrl" class="college-logo" [src]="player.schoolLogoUrl" alt="" width="24" height="24" loading="lazy" (error)="player.schoolLogoUrl = null">
+              <span>{{ player.school }}</span>
+            </span>
+          </span>
           <span class="draft-pick-source">{{ pick.selection_source }}</span>
         </li>
       </ol>

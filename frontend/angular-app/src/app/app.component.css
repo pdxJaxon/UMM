@@ -685,6 +685,17 @@ label,
 
 .draft-player {
   color: #65716e;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.draft-player-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+  font-size: 11px;
 }
 
 .draft-pick-source {

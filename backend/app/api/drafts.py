@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -205,14 +205,15 @@ def create_pick(
 @router.post("/{draft_id}/auto-simulate")
 def simulate_draft(
     draft_id: str,
+    max_picks: int | None = Query(default=None, ge=1, le=32),
     current_user: UserRecord = Depends(get_current_user),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    """Simulate non-controlled team picks until user action is needed."""
+    """Simulate a bounded number of picks, or until user action is needed."""
     repository = DraftRepository(session)
     try:
         draft = repository.get_owned(draft_id, current_user.id)
-        repository.auto_simulate(draft)
+        repository.auto_simulate(draft, max_picks=max_picks)
         session.commit()
         return repository.state(draft)
     except LookupError as exc:

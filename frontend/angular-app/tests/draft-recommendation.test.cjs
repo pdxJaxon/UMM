@@ -9,16 +9,20 @@ const source = fs.readFileSync(path.join(__dirname, '../src/app/app.component.ts
 const compiled = ts.transpileModule(source, {
   compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, experimentalDecorators: true }
 }).outputText;
-const exportsObject = {};
-vm.runInNewContext(compiled, {
-  exports: exportsObject,
-  require: (name) => name === '@angular/core' ? { Component: () => () => {} } : {},
-  setTimeout
-});
+function componentClass(timers = { setTimeout, clearTimeout }) {
+  const exportsObject = {};
+  vm.runInNewContext(compiled, {
+    exports: exportsObject,
+    require: (name) => name === '@angular/core' ? { Component: () => () => {}, ViewChild: () => () => {} } : {},
+    ...timers
+  });
+  return exportsObject.AppComponent;
+}
 
-function setup() {
+function setup(timers) {
   const requests = [];
-  const component = new exportsObject.AppComponent({
+  const Component = componentClass(timers);
+  const component = new Component({
     post: (url, body) => ({ subscribe: (callbacks) => requests.push({ method: 'POST', url, body, ...callbacks }) }),
     get: (url) => ({ subscribe: (callbacks) => requests.push({ method: 'GET', url, ...callbacks }) }),
     put: (url, body) => ({ subscribe: (callbacks) => requests.push({ method: 'PUT', url, body, ...callbacks }) })
@@ -206,4 +210,141 @@ test('late copy and board loads cannot replace another team or signed-out view',
   assert.equal(component.entries.length, 0);
   assert.equal(component.loading, false);
   assert.equal(requests.length, 3);
+});
+
+function clock() {
+  let now = 0;
+  let id = 0;
+  const pending = new Map();
+  return {
+    setTimeout(callback, delay) { pending.set(++id, { callback, at: now + delay }); return id; },
+    clearTimeout(timer) { pending.delete(timer); },
+    tick(ms) {
+      now += ms;
+      for (const [timer, task] of [...pending]) {
+        if (task.at <= now) { pending.delete(timer); task.callback(); }
+      }
+    },
+    get pending() { return pending.size; }
+  };
+}
+
+function draftState(count, currentTeam = 'team-3', status = 'drafting') {
+  return {
+    draft_run: { id: 'draft-1', status, controlled_team_id: 'team-1' },
+    current_team_id: currentTeam, current_pick_number: count + 1,
+    picks: Array.from({ length: count }, (_, index) => ({ player_id: `picked-${index}` })),
+    trades: []
+  };
+}
+
+test('automated picks advance individually with a full 2500ms pause and stop on the user turn', () => {
+  const timer = clock();
+  const { component, requests } = setup(timer);
+  component.advanceDraft('draft-1');
+  assert.match(requests[0].url, /auto-simulate\?max_picks=1$/);
+  requests[0].next(draftState(1));
+  assert.equal(component.draftState.picks.length, 1);
+  assert.equal(component.draftBusy, true);
+  timer.tick(2499);
+  assert.equal(requests.length, 1);
+  timer.tick(1);
+  assert.equal(requests.length, 2);
+  timer.tick(10000);
+  assert.equal(requests.length, 2, 'no overlapping request while server is responding');
+  requests[1].next(draftState(2, 'team-1'));
+  assert.equal(component.draftBusy, false);
+  assert.match(requests[2].url, /recommendation$/);
+  assert.equal(timer.pending, 0);
+});
+
+test('a user pick pauses before the next automatic selection; completion leaves the recap', () => {
+  const timer = clock();
+  const { component, requests } = setup(timer);
+  component.draftSelectedPlayerId = 'a';
+  component.submitDraftPick();
+  requests[0].next(draftState(1));
+  timer.tick(2499);
+  assert.equal(requests.length, 1);
+  timer.tick(1);
+  assert.equal(requests.length, 2);
+  requests[1].next(draftState(32, '', 'completed'));
+  assert.equal(component.draftBusy, false);
+  assert.equal(component.draftState.picks.length, 32);
+  assert.equal(timer.pending, 0);
+  timer.tick(10000);
+  assert.equal(requests.length, 2);
+});
+
+test('pacing cancels on logout and destroy, and ignores late responses', () => {
+  for (const action of ['logout', 'ngOnDestroy']) {
+    const timer = clock();
+    const { component, requests } = setup(timer);
+    component.advanceDraft('draft-1');
+    requests[0].next(draftState(1));
+    assert.equal(timer.pending, 1);
+    component[action]();
+    assert.equal(timer.pending, 0);
+    timer.tick(3000);
+    assert.equal(requests.length, 1);
+    const late = setup(clock());
+    late.component.advanceDraft('draft-1');
+    late.component[action]();
+    late.requests[0].next(draftState(2));
+    assert.notEqual(late.component.draftState?.picks.length, 2);
+  }
+});
+
+test('failed single-pick advancement stops pacing and retries explicitly', () => {
+  const timer = clock();
+  const { component, requests } = setup(timer);
+  component.advanceDraft('draft-1');
+  requests[0].error({ error: { detail: 'Service unavailable' } });
+  assert.equal(component.draftBusy, false);
+  assert.equal(component.draftError, 'Service unavailable');
+  timer.tick(3000);
+  assert.equal(requests.length, 1);
+  component.simulateToUserPick();
+  requests[1].next(draftState(32, '', 'completed'));
+  assert.equal(component.draftError, null);
+  assert.equal(timer.pending, 0);
+});
+
+test('pick log metadata comes from the draft pool, including players absent from the personal board', () => {
+  const { component } = setup();
+  component.draftEntries = component.mapDraftEntries([{
+    player_id: 'pool-only', first_name: 'Real', last_name: 'Candidate', position: 'EDGE',
+    college_name: 'Ohio State', college_logo_url: 'https://example.test/college.png'
+  }], []);
+  assert.equal(component.draftPlayerName('pool-only'), 'Real Candidate');
+  const details = component.draftPlayerDetails('pool-only');
+  assert.equal(details.position, 'EDGE');
+  assert.equal(details.school, 'Ohio State');
+  assert.equal(details.schoolLogoUrl, 'https://example.test/college.png');
+  details.schoolLogoUrl = null;
+  assert.equal(component.draftPlayerDetails('pool-only').school, 'Ohio State');
+  assert.equal(component.draftPlayerDetails('unknown'), undefined);
+  assert.equal(component.draftPlayerName('unknown'), 'unknown');
+  const preferred = component.mapDraftEntries([{
+    player_id: 'pool-only', position: 'OT', college_name: 'Texas',
+    college_logo_url: 'https://example.test/updated.png'
+  }], component.draftEntries);
+  assert.equal(preferred[0].position, 'OT');
+  assert.equal(preferred[0].school, 'Texas');
+  assert.equal(preferred[0].schoolLogoUrl, 'https://example.test/updated.png');
+});
+
+test('the pick log follows new selections without overriding manual scrolling between picks', () => {
+  const { component } = setup();
+  const list = { scrollTop: 0, scrollHeight: 1200 };
+  component.draftPickList = { nativeElement: list };
+  component.setDraftState(draftState(10));
+  component.ngAfterViewChecked();
+  assert.equal(list.scrollTop, 1200);
+  list.scrollTop = 50;
+  component.ngAfterViewChecked();
+  assert.equal(list.scrollTop, 50);
+  component.setDraftState(draftState(11));
+  component.ngAfterViewChecked();
+  assert.equal(list.scrollTop, 1200);
 });
