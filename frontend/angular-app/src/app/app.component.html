@@ -147,7 +147,7 @@
         <ng-container *ngIf="recommendation as suggestion">
           <h3>{{ suggestion.recommended.name }}</h3>
           <p>Available-pool rank {{ suggestion.recommended.rank }} · {{ suggestion.recommended.position }} · {{ suggestion.recommended.college_name ?? 'School unavailable' }}</p>
-          <p *ngIf="suggestion.recommended.source_rank != null">Source consensus rank {{ suggestion.recommended.source_rank }}</p>
+          <p *ngIf="suggestion.recommended.source_rank != null">Source board rank {{ suggestion.recommended.source_rank }}</p>
           <p *ngIf="suggestion.recommended.is_projected">Projected prospect; eligibility and declaration are unconfirmed.</p>
           <p>Model confidence: {{ suggestion.confidence | percent:'1.0-0' }} · {{ suggestion.model }}</p>
           <ul><li *ngFor="let reason of suggestion.reasoning_factors">{{ reason }}</li></ul>
@@ -259,7 +259,7 @@
         <div class="signal"><span>Team need</span><strong>{{ entry.need }}<i>%</i></strong><div class="meter"><b [style.width.%]="entry.need"></b></div></div>
         <div class="signal"><span>Team fit</span><strong>{{ entry.fit }}<i>%</i></strong><div class="meter"><b [style.width.%]="entry.fit"></b></div></div>
         <p class="source">Evidence: {{ entry.source }}</p>
-        <p *ngIf="entry.sourceRank != null" class="source">Source consensus rank: {{ entry.sourceRank }} (separate from UMM score)</p>
+        <p *ngIf="entry.sourceRank != null" class="source">Source board rank: {{ entry.sourceRank }} (separate from UMM score)</p>
         <p *ngIf="entry.projected" class="source">Projected prospect. Draft eligibility and declaration are unconfirmed; status and ranking may change.</p>
       </aside>
 
