@@ -53,6 +53,10 @@ class PredictionProvider(Protocol):
         """Return a decoded structured prediction payload."""
 
 
+class RecommendationNotConfiguredError(RuntimeError):
+    """AI recommendations require operator configuration."""
+
+
 class OpenAICompatiblePredictionProvider:
     """Call an OpenAI-compatible chat-completions endpoint with JSON output."""
 
@@ -75,7 +79,7 @@ class OpenAICompatiblePredictionProvider:
     def complete(self, prompt: str, randomness: float) -> dict[str, Any]:
         """Request one JSON prediction and reject malformed provider responses."""
         if not self.api_key:
-            raise RuntimeError("LLM_API_KEY is not configured")
+            raise RecommendationNotConfiguredError("LLM_API_KEY is not configured")
         try:
             response = self.client.post(
                 self.api_url,

@@ -149,6 +149,7 @@
       <section *ngIf="draftOnControlledTeam" class="recommendation-panel" aria-label="Engine recommendation" aria-live="polite">
         <p class="eyebrow">ENGINE RECOMMENDATION / ADVISORY ONLY</p>
         <p *ngIf="recommendationLoading" role="status">Reviewing available prospects and team evidence...</p>
+        <p *ngIf="recommendationNotice" role="status">{{ recommendationNotice }}</p>
         <p *ngIf="recommendationError" class="draft-error" role="alert">{{ recommendationError }}</p>
         <ng-container *ngIf="recommendation as suggestion">
           <h3>{{ suggestion.recommended.name }}</h3>
@@ -166,7 +167,7 @@
           </div>
           <p>Choosing a prospect only fills the selector below. Press Make pick to confirm, or select anyone else.</p>
         </ng-container>
-        <button class="text-button" (click)="loadRecommendation()" [disabled]="recommendationLoading || draftBusy">{{ recommendationError ? 'Retry recommendation' : 'Refresh recommendation' }}</button>
+        <button *ngIf="!recommendationNotice" class="text-button" (click)="loadRecommendation()" [disabled]="recommendationLoading || draftBusy">{{ recommendationError ? 'Retry recommendation' : 'Refresh recommendation' }}</button>
       </section>
 
       <div *ngIf="draft.draft_run.status === 'drafting' && draftOnControlledTeam" class="draft-on-clock">
@@ -203,7 +204,6 @@
               <span>{{ player.school }}</span>
             </span>
           </span>
-          <span class="draft-pick-source">{{ pick.selection_source }}</span>
         </li>
       </ol>
 

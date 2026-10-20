@@ -11,7 +11,10 @@ from app.core.auth import get_current_user
 from app.db.models import DraftPickRecord, PlayerRecord, TeamRecord, UserRecord
 from app.db.session import get_db
 from app.services.draft_repository import DraftRepository
-from app.services.llm_prediction import OpenAICompatiblePredictionProvider, PredictionContext, predict_pick
+from app.services.llm_prediction import (
+    OpenAICompatiblePredictionProvider, PredictionContext,
+    RecommendationNotConfiguredError, predict_pick,
+)
 from app.services.prospect_pool import pool_filter
 
 router = APIRouter(prefix="/api/drafts", tags=["drafts"])
@@ -166,6 +169,11 @@ def recommend_current_pick(
     try:
         repository = DraftRepository(session, prediction_provider=provider)
         return repository.recommend(repository.get_owned(draft_id, current_user.id))
+    except RecommendationNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": "recommendation_not_configured",
+            "message": "AI recommendations are not enabled yet. You can still select a prospect and make your pick.",
+        }) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:

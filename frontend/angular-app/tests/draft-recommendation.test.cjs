@@ -105,6 +105,30 @@ test('logout and completed drafts ignore recommendations', () => {
   assert.equal(completed.requests.length, 0);
 });
 
+test('unconfigured AI shows an informational notice and leaves manual drafting available', () => {
+  const { component, requests } = setup();
+  component.loadRecommendation();
+  requests[0].error({
+    status: 503, error: { detail: { code: 'recommendation_not_configured' } }
+  });
+  assert.equal(component.recommendationLoading, false);
+  assert.equal(component.recommendationError, null);
+  assert.match(component.recommendationNotice, /not enabled yet/);
+  assert.equal(component.draftBusy, false);
+  component.chooseRecommendation('b');
+  component.submitDraftPick();
+  assert.equal(requests[1].body.player_id, 'b');
+  assert.equal(component.recommendationNotice, null);
+});
+
+test('draft template hides internal pick sources and distinguishes unavailable AI from errors', () => {
+  const template = fs.readFileSync(path.join(__dirname, '../src/app/app.component.html'), 'utf8');
+  assert.doesNotMatch(template, /pick\.selection_source|draft-pick-source/);
+  assert.match(template, /\*ngIf="recommendationNotice" role="status"/);
+  assert.match(template, /\*ngIf="!recommendationNotice" class="text-button"/);
+  assert.match(template, /\*ngIf="recommendationError" class="draft-error" role="alert"/);
+});
+
 test('empty available pool has an explicit state and makes no provider request', () => {
   const { component, requests } = setup();
   component.draftEntries = [];
