@@ -63,6 +63,62 @@ def _ids(session, snapshot_id):
     return set(session.scalars(select(PlayerRecord.id).where(pool_filter(2027, snapshot_id))))
 
 
+def test_pff_default_copy_reload_and_reorder_keep_real_pool_and_source_evidence(session, tmp_path):
+    from app.services.pff_csv import read_pff_csv
+
+    session.add(PlayerRecord(
+        id="legacy-sample", first_name="Sample", last_name="Only", position="WR",
+        college_id="alabama", draft_year=2027, eligibility_status="eligible",
+    ))
+    session.commit()
+    path = tmp_path / "pff.csv"
+    path.write_text("Rank,Player,Position,School,PFF Grade,Analysis\n" + "".join(
+        f"{rank},Source Candidate{rank},WR,Ohio State,,\n" for rank in range(1, 41)
+    ), encoding="utf-8")
+    snapshot = read_pff_csv(path, draft_year=2027, snapshot_date=date(2026, 10, 19))
+    imported = import_board_snapshot(session, snapshot, commit=True)
+    approve_projected_snapshot(session, imported["snapshot_id"])
+    session.commit()
+    default = generate_persisted_team_board(session, "team-1", 2027)
+    default_ids = [entry.player_id for entry in sorted(default.entries, key=lambda entry: entry.rank_position)]
+    assert len(default_ids) == 40
+    assert "legacy-sample" not in default_ids
+    app.dependency_overrides[get_db] = lambda: session
+    try:
+        client = TestClient(app)
+        headers = {"Authorization": f"Bearer {create_access_token('user')}"}
+        url = "/api/teams/team-1/board"
+        response = client.post(f"{url}/copy?draft_year=2027", headers=headers)
+        assert response.status_code == 200
+        copied_id = response.json()["board_id"]
+        personal = client.get(f"{url}?draft_year=2027&board_type=personal", headers=headers).json()
+        assert [entry["player_id"] for entry in personal["entries"]] == default_ids
+        assert all(entry["first_name"] == "Source" for entry in personal["entries"])
+        assert all(entry["college_name"] == "Ohio State" for entry in personal["entries"])
+        assert all(entry["source_name"] == "pff-big-board" for entry in personal["entries"])
+        assert all(entry["is_projected"] for entry in personal["entries"])
+        assert {entry["source_rank"] for entry in personal["entries"]} == set(range(1, 41))
+        assert all(
+            entry["score_breakdown"]["source_snapshot_id"] == imported["snapshot_id"]
+            for entry in personal["entries"]
+        )
+        order = list(reversed(default_ids))
+        assert client.put(
+            f"{url}/{copied_id}/order", headers=headers, json={"player_ids": order},
+        ).status_code == 200
+        session.expire_all()
+        reloaded = client.get(f"{url}?draft_year=2027&board_type=personal", headers=headers).json()
+        assert [entry["player_id"] for entry in reloaded["entries"]] == order
+        assert reloaded["entries"][0]["source_rank"] == 40
+        unchanged = client.get(f"{url}?draft_year=2027").json()
+        assert [entry["player_id"] for entry in unchanged["entries"]] == default_ids
+        assert client.get(
+            "/api/teams/team-2/board?draft_year=2027&board_type=personal", headers=headers,
+        ).json()["board"] is None
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_import_does_not_approve_and_approval_does_not_change_eligibility(session, tmp_path):
     report = _import(session, tmp_path)
     assert _ids(session, report["snapshot_id"]) == set()

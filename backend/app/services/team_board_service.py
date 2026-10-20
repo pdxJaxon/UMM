@@ -129,24 +129,35 @@ def copy_board_for_user(
     user_id: str,
 ) -> TeamBoardRecord:
     """Create a user-owned editable copy of a default board."""
+    if source_board.board_type != "default" or source_board.user_id is not None:
+        raise ValueError("Only a default team board can be copied")
+    active_entries = sorted(
+        (entry for entry in source_board.entries if entry.is_active),
+        key=lambda entry: entry.rank_position,
+    )
+    if not active_entries:
+        raise ValueError("The default board has no active prospects; generate it before copying")
+    previous = get_latest_board(
+        session, source_board.team_id, source_board.draft_year, board_type="personal", user_id=user_id,
+    )
     board = TeamBoardRecord(
         team_id=source_board.team_id,
         user_id=user_id,
         draft_year=source_board.draft_year,
         board_type="personal",
-        version=1,
+        version=previous.version + 1 if previous is not None else 1,
         generated_at=datetime.now(UTC),
         scoring_version=source_board.scoring_version,
         scoring_weights=source_board.scoring_weights,
     )
     session.add(board)
     session.flush()
-    for entry in sorted(source_board.entries, key=lambda item: item.rank_position):
+    for rank_position, entry in enumerate(active_entries, start=1):
         session.add(
             TeamBoardEntryRecord(
                 board_id=board.id,
                 player_id=entry.player_id,
-                rank_position=entry.rank_position,
+                rank_position=rank_position,
                 score=entry.score,
                 score_breakdown=entry.score_breakdown,
             )

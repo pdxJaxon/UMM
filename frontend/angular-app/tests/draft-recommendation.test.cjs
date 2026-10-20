@@ -19,7 +19,9 @@ vm.runInNewContext(compiled, {
 function setup() {
   const requests = [];
   const component = new exportsObject.AppComponent({
-    post: (url, body) => ({ subscribe: (callbacks) => requests.push({ url, body, ...callbacks }) })
+    post: (url, body) => ({ subscribe: (callbacks) => requests.push({ method: 'POST', url, body, ...callbacks }) }),
+    get: (url) => ({ subscribe: (callbacks) => requests.push({ method: 'GET', url, ...callbacks }) }),
+    put: (url, body) => ({ subscribe: (callbacks) => requests.push({ method: 'PUT', url, body, ...callbacks }) })
   });
   component.accessToken = 'test-only';
   component.draftEntries = ['a', 'b'].map((id) => ({ player_id: id, name: id }));
@@ -120,4 +122,88 @@ test('reviewed projections are labeled honestly and existing draft basis stays p
   assert.match(component.draftOrderLabel, /Projected draft order/);
   component.teams[0].draft_order_basis = 'seeded-sample';
   assert.match(component.draftOrderLabel, /not the official NFL order/);
+});
+
+const sourceBoard = {
+  board: { id: 50, version: 1 },
+  entries: [
+    { player_id: 'pff-a', first_name: 'Source', last_name: 'Candidate', position: 'WR',
+      college_name: 'Ohio State', rank_position: 1, score: 90, source_rank: 2,
+      source_name: 'pff-big-board', is_projected: true }
+  ]
+};
+
+function boardSetup() {
+  const state = setup();
+  state.component.draftId = null;
+  state.component.draftState = null;
+  state.component.selectedTeamId = 'team-1';
+  return state;
+}
+
+test('copying loads persisted personal prospects and saving sends their exact IDs', () => {
+  const { component, requests } = boardSetup();
+  component.copyBoard();
+  assert.match(requests[0].url, /team-1\/board\/copy.*replace_existing=false/);
+  assert.equal(component.boardActionEnabled, false);
+  component.copyBoard();
+  assert.equal(requests.length, 1);
+  requests[0].next({ board_id: 50, version: 1 });
+  assert.match(requests[1].url, /board_type=personal/);
+  requests[1].next(sourceBoard);
+  assert.equal(component.boardMode, 'personal');
+  assert.equal(component.entries[0].name, 'Source Candidate');
+  assert.equal(component.entries[0].source, 'pff-big-board');
+  assert.equal(component.entries[0].sourceRank, 2);
+  assert.equal(component.entries[0].projected, true);
+  component.saveBoard();
+  assert.equal(requests[2].method, 'PUT');
+  assert.deepEqual(Array.from(requests[2].body.player_ids), ['pff-a']);
+});
+
+test('existing custom board requires explicit confirmation and cancellation never writes', () => {
+  const { component, requests } = boardSetup();
+  component.copyBoard(true);
+  assert.equal(requests.length, 0);
+  component.copyBoard();
+  requests[0].error({ status: 409 });
+  assert.equal(component.confirmingBoardCopy, true);
+  assert.equal(requests.length, 1);
+  component.cancelBoardCopy();
+  component.copyBoard(true);
+  assert.equal(requests.length, 1);
+  component.copyBoard();
+  requests[1].error({ status: 409 });
+  component.copyBoard(true);
+  assert.match(requests[2].url, /replace_existing=true/);
+  requests[2].next({ board_id: 51, version: 4 });
+  requests[3].next({ ...sourceBoard, board: { id: 51, version: 4 } });
+  assert.equal(component.boardVersion, 4);
+});
+
+test('failed copy leaves the current board intact and exposes the API error', () => {
+  const { component, requests } = boardSetup();
+  component.entries = [{ player_id: 'existing' }];
+  component.copyBoard();
+  requests[0].error({ status: 400, error: { detail: 'Default board has no prospects' } });
+  assert.equal(component.entries[0].player_id, 'existing');
+  assert.equal(component.error, 'Default board has no prospects');
+  assert.equal(component.loading, false);
+});
+
+test('late copy and board loads cannot replace another team or signed-out view', () => {
+  const { component, requests } = boardSetup();
+  component.loadBoard();
+  component.selectedTeamId = 'team-2';
+  component.onTeamChange();
+  requests[0].next(sourceBoard);
+  assert.equal(component.entries.length, 0);
+  requests[1].next({ board: null, entries: [] });
+  component.copyBoard();
+  component.logout();
+  requests[2].next({ board_id: 50, version: 1 });
+  assert.equal(component.boardMode, 'default');
+  assert.equal(component.entries.length, 0);
+  assert.equal(component.loading, false);
+  assert.equal(requests.length, 3);
 });

@@ -8,6 +8,10 @@ Candidate ingestion now accepts authorized dated PFF CSV exports. See the
 [PFF import and nightly-job workflow](data/README.md#pff-csv-imports-and-projected-pools);
 simulation-pool approval and detailed prospect enrichment remain separate.
 
+Users can copy their team's generated default into **My board**, then reorder
+and save the persisted prospects. Existing custom orders require confirmation
+before replacement; see [personal board copying](data/README.md#copy-a-default-board-into-a-personal-board).
+
 ## Run locally on Windows
 
 ### Prerequisites
