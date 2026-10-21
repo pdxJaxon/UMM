@@ -12,6 +12,11 @@ interface TeamOption {
   draft_order_basis?: string;
 }
 
+interface TeamNeedPayload {
+  position_code: string;
+  need_score: number;
+}
+
 interface TeamColors {
   primary: string;
   secondary: string;
@@ -174,6 +179,9 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
   @ViewChild('draftPickList') private draftPickList?: ElementRef<HTMLOListElement>;
   private visiblePickCount = 0;
   protected teams: TeamOption[] = [];
+  protected teamNeeds: string[] = [];
+  protected teamNeedsLoading = false;
+  protected teamNeedsError: string | null = null;
   protected selectedTeamId = '';
   protected boardMode: 'default' | 'personal' = 'default';
   protected authMode: 'login' | 'register' = 'login';
@@ -231,6 +239,8 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
   private authSession = 0;
   private boardId: number | null = null;
   private boardRequest = 0;
+  private teamNeedsRequest = 0;
+  private teamNeedsTeamId: string | null = null;
   private readonly draftYear = 2027;
 
   constructor(private readonly http: HttpClient) {}
@@ -421,6 +431,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
       this.loading = false;
       this.entries = [];
       this.activeEntry = null;
+      this.loadTeamNeeds();
       return;
     }
 
@@ -429,6 +440,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
       this.entries = [];
       this.activeEntry = null;
       this.error = 'Sign in to load or save your personal board.';
+      this.loadTeamNeeds();
       return;
     }
 
@@ -464,6 +476,47 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
           this.error = this.describeApiError(error, this.boardMode === 'personal'
             ? 'Unable to load your personal board.'
             : 'No board is available yet for this team.');
+        }
+      });
+    this.loadTeamNeeds();
+  }
+
+  private loadTeamNeeds(): void {
+    const teamId = this.selectedTeamId;
+    if (teamId && teamId === this.teamNeedsTeamId && !this.teamNeedsError) return;
+    const request = ++this.teamNeedsRequest;
+    this.teamNeeds = [];
+    this.teamNeedsError = null;
+    if (!teamId) {
+      this.teamNeedsTeamId = null;
+      this.teamNeedsLoading = false;
+      return;
+    }
+
+    this.teamNeedsTeamId = teamId;
+    this.teamNeedsLoading = true;
+    this.http
+      .get<TeamNeedPayload[]>(
+        `${this.apiBase}/api/teams/${teamId}/needs?draft_year=${this.draftYear}`
+      )
+      .subscribe({
+        next: (needs) => {
+          if (request !== this.teamNeedsRequest || teamId !== this.selectedTeamId) return;
+          this.teamNeeds = [...new Set(
+            needs
+              .filter((need) => need.need_score > 0)
+              .map((need) => {
+                const position = need.position_code.trim().toUpperCase();
+                return position === 'EDGE' ? 'ED' : position;
+              })
+          )];
+          this.teamNeedsLoading = false;
+        },
+        error: (error: HttpErrorResponse) => {
+          if (request !== this.teamNeedsRequest || teamId !== this.selectedTeamId) return;
+          this.teamNeedsTeamId = null;
+          this.teamNeedsLoading = false;
+          this.teamNeedsError = this.describeApiError(error, 'Unable to load team needs.');
         }
       });
   }

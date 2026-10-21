@@ -84,6 +84,14 @@ selection preference, not model evidence. Already selected, withdrawn, and
 out-of-pool players cannot be recommended. Responses are bound to the draft,
 team, and current pick and are discarded when that state changes.
 
+The selected team's active, nonzero team needs appear above its board title as
+position abbreviations. Automated and AI-recommended picks may prioritize
+positions with a need score of 70 or higher, but only within the round's maximum
+reach distance on the team's default board: 12, 15, 20, 25, 35, 60, and 150
+board slots for rounds one through seven, respectively. The current draft
+simulator covers round one; reach limits are configured per round for
+later-round support. Manual picks remain under the user's control.
+
 Configure `LLM_API_KEY` in the backend environment to enable the existing
 OpenAI-compatible provider; `LLM_API_URL` and `LLM_MODEL` select the service/model.
 Without a configured key, the draft room shows an informational notice that AI

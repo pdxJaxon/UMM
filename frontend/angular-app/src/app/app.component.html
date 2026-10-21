@@ -226,6 +226,15 @@
         <div class="panel-heading">
           <div>
             <span class="panel-kicker">{{ selectedTeamName }}</span>
+            <div class="team-needs" aria-label="Team needs">
+              <span class="team-needs-label">NEEDS</span>
+              <span *ngIf="teamNeedsLoading" role="status">Loading</span>
+              <ng-container *ngIf="!teamNeedsLoading && !teamNeedsError">
+                <span *ngFor="let position of teamNeeds">{{ position }}</span>
+                <span *ngIf="!teamNeeds.length">None listed</span>
+              </ng-container>
+              <span *ngIf="teamNeedsError" class="team-needs-error" role="alert">{{ teamNeedsError }}</span>
+            </div>
             <h2>{{ boardMode === 'default' ? 'Default board' : 'Personal board' }}</h2>
           </div>
           <div class="panel-summary">

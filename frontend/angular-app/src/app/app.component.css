@@ -756,6 +756,32 @@ label,
   font-size: 13px;
 }
 
+.team-needs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: center;
+  margin-top: 8px;
+  color: #65716e;
+  font: 700 11px "Courier New", monospace;
+}
+
+.team-needs-label {
+  margin-right: 3px;
+  letter-spacing: .08em;
+}
+
+.team-needs > span:not(.team-needs-label):not(.team-needs-error) {
+  padding: 3px 5px;
+  color: #1d2a2d;
+  background: #e9efeb;
+}
+
+.team-needs-error {
+  color: #8f351f;
+  font: 400 11px Arial, sans-serif;
+}
+
 .panel-heading h2,
 .evidence-panel h2 {
   margin: 5px 0 0;

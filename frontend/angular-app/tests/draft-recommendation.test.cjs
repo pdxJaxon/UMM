@@ -152,6 +152,37 @@ test('reviewed projections are labeled honestly and existing draft basis stays p
   assert.match(component.draftOrderLabel, /not the official NFL order/);
 });
 
+test('team needs load in priority order, omit zero scores, and ignore stale responses', () => {
+  const { component, requests } = boardSetup();
+  component.loadBoard();
+  const needsRequest = requests.find((request) => request.url.includes('/needs?'));
+  assert.ok(needsRequest);
+  assert.match(needsRequest.url, /team-1\/needs\?draft_year=2027/);
+  needsRequest.next([
+    { position_code: 'QB', need_score: 90 },
+    { position_code: 'WR', need_score: 80 },
+    { position_code: 'EDGE', need_score: 75 },
+    { position_code: 'RB', need_score: 0 },
+    { position_code: 'QB', need_score: 70 }
+  ]);
+  assert.deepEqual(Array.from(component.teamNeeds), ['QB', 'WR', 'ED']);
+
+  component.selectedTeamId = 'team-2';
+  component.loadTeamNeeds();
+  const stale = needsRequest;
+  stale.next([{ position_code: 'TE', need_score: 100 }]);
+  assert.deepEqual(Array.from(component.teamNeeds), []);
+  requests.at(-1).next([{ position_code: 'CB', need_score: 100 }]);
+  assert.deepEqual(Array.from(component.teamNeeds), ['CB']);
+});
+
+test('team needs appear above the board title without exposing their scores', () => {
+  const template = fs.readFileSync(path.join(__dirname, '../src/app/app.component.html'), 'utf8');
+  assert.match(template, /class="team-needs" aria-label="Team needs"/);
+  assert.match(template, /<span \*ngFor="let position of teamNeeds">\{\{ position \}\}<\/span>/);
+  assert.doesNotMatch(template, /\{\{[^}]*need_score/);
+});
+
 const sourceBoard = {
   board: { id: 50, version: 1 },
   entries: [
@@ -185,8 +216,9 @@ test('copying loads persisted personal prospects and saving sends their exact ID
   assert.equal(component.entries[0].sourceRank, 2);
   assert.equal(component.entries[0].projected, true);
   component.saveBoard();
-  assert.equal(requests[2].method, 'PUT');
-  assert.deepEqual(Array.from(requests[2].body.player_ids), ['pff-a']);
+  const saveRequest = requests.find((request) => request.method === 'PUT');
+  assert.ok(saveRequest);
+  assert.deepEqual(Array.from(saveRequest.body.player_ids), ['pff-a']);
 });
 
 test('reordering a personal board autosaves and serializes changes made during a save', () => {
@@ -275,14 +307,14 @@ test('late copy and board loads cannot replace another team or signed-out view',
   component.onTeamChange();
   requests[0].next(sourceBoard);
   assert.equal(component.entries.length, 0);
-  requests[1].next({ board: null, entries: [] });
+  requests.find((request) => request.url.includes('team-2/board?')).next({ board: null, entries: [] });
   component.copyBoard();
   component.logout();
-  requests[2].next({ board_id: 50, version: 1 });
+  requests.find((request) => request.url.includes('/board/copy')).next({ board_id: 50, version: 1 });
   assert.equal(component.boardMode, 'default');
   assert.equal(component.entries.length, 0);
   assert.equal(component.loading, false);
-  assert.equal(requests.length, 3);
+  assert.equal(requests.filter((request) => request.url.includes('/board/copy')).length, 1);
 });
 
 function clock() {

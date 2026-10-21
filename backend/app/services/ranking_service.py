@@ -87,6 +87,16 @@ POSITION_IMPORTANCE = {
     "LS": 30.0,
 }
 
+MAX_REACH_BY_ROUND = {
+    1: 12,
+    2: 15,
+    3: 20,
+    4: 25,
+    5: 35,
+    6: 60,
+    7: 150,
+}
+
 
 def get_position_importance(position: str) -> float:
     """Return a normalized 0-100 baseline importance for an NFL position."""
@@ -144,6 +154,48 @@ def calculate_team_need_score(needs: Iterable[Mapping[str, object]], position: s
         return 0.0
     multipliers = (1.0, 0.35, 0.15)
     return min(max(sum(score * multipliers[min(index, 2)] for index, score in enumerate(scores)), 0.0), 100.0)
+
+
+def candidates_within_team_need_reach(
+    candidates: list[str],
+    positions: Mapping[str, str],
+    board_ranks: Mapping[str, int],
+    team_needs: Iterable[Mapping[str, object]],
+    round_number: int,
+) -> list[str]:
+    """Prioritize reachable high-need prospects while retaining the BPA option."""
+    if not candidates:
+        raise ValueError("At least one candidate is required")
+    if round_number not in MAX_REACH_BY_ROUND:
+        raise ValueError("Round number must be between 1 and 7")
+
+    best_available = candidates[0]
+    best_rank = board_ranks.get(best_available, 1)
+    reachable_need_positions = {
+        POSITION_ALIASES.get(
+            str(need.get("position_code", "")).strip().upper(),
+            str(need.get("position_code", "")).strip().upper(),
+        )
+        for need in team_needs
+        if float(need.get("need_score", 0.0)) >= 70
+    }
+    max_reach = MAX_REACH_BY_ROUND[round_number]
+    reachable_needs: list[str] = []
+    for index, player_id in enumerate(candidates):
+        rank = board_ranks.get(player_id, best_rank + index)
+        if rank - best_rank > max_reach:
+            break
+        position = str(positions.get(player_id, "")).strip().upper()
+        position = POSITION_ALIASES.get(position, position)
+        if position in reachable_need_positions:
+            reachable_needs.append(player_id)
+    if reachable_needs:
+        return [
+            reachable_needs[0],
+            *([best_available] if best_available not in reachable_needs else []),
+            *reachable_needs[1:],
+        ]
+    return [best_available]
 
 
 def calculate_team_tendency_fit(
