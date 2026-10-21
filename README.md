@@ -100,12 +100,18 @@ shown separately. Confidence and explanations are model output, not verified
 scouting facts. Completed rounds remain visible as a first-round recap until
 you choose **Close draft**.
 
-Automated picks are saved and shown one at a time, with a 2.5-second pause
+Automated picks are saved and shown one at a time, with a user-selected pause:
+**Slow** (3 seconds), **Medium** (2 seconds, the default), or **Fast** (1 second)
 after each visible pick before requesting the next selection (server latency
-can make the interval longer). The draft pauses for your team's turn and stops
+can make the interval longer). Speed can be changed before or during a draft.
+Changing speed during a pending pause restarts that pause at the new duration;
+an in-flight request is not interrupted. The draft pauses for your team's turn and stops
 at round completion. Failures stop advancement and expose **Retry advance**;
 signing out or leaving the app cancels pending timers. The pick log and recap
 show each prospect's position, college name, and college logo when available.
+The selecting NFL team's logo appears to the left of its name. Missing or
+failed team logos leave the team name visible. The prospect selector omits
+repeated "Projected" labels; the draft eligibility notice remains visible.
 A failed logo is hidden without removing the college name.
 Internal selection-source labels are not displayed in the log or recap.
 The log follows each new selection; scrolling between selections is preserved

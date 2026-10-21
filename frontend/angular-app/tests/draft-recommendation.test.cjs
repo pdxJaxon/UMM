@@ -262,7 +262,7 @@ function draftState(count, currentTeam = 'team-3', status = 'drafting') {
   };
 }
 
-test('automated picks advance individually with a full 2500ms pause and stop on the user turn', () => {
+test('automated picks default to a full 2000ms pause and stop on the user turn', () => {
   const timer = clock();
   const { component, requests } = setup(timer);
   component.advanceDraft('draft-1');
@@ -270,7 +270,7 @@ test('automated picks advance individually with a full 2500ms pause and stop on 
   requests[0].next(draftState(1));
   assert.equal(component.draftState.picks.length, 1);
   assert.equal(component.draftBusy, true);
-  timer.tick(2499);
+  timer.tick(1999);
   assert.equal(requests.length, 1);
   timer.tick(1);
   assert.equal(requests.length, 2);
@@ -282,13 +282,75 @@ test('automated picks advance individually with a full 2500ms pause and stop on 
   assert.equal(timer.pending, 0);
 });
 
+test('each selectable speed waits its exact duration without overlapping requests', () => {
+  for (const delay of [3000, 2000, 1000]) {
+    const timer = clock();
+    const { component, requests } = setup(timer);
+    component.setDraftSpeed(delay);
+    component.advanceDraft('draft-1');
+    requests[0].next(draftState(1));
+    timer.tick(delay - 1);
+    assert.equal(requests.length, 1);
+    timer.tick(1);
+    assert.equal(requests.length, 2);
+    timer.tick(10000);
+    assert.equal(requests.length, 2);
+  }
+});
+
+test('speed changes replace a pending pause and do not invalidate in-flight requests', () => {
+  const timer = clock();
+  const { component, requests } = setup(timer);
+  component.advanceDraft('draft-1');
+  component.setDraftSpeed(3000);
+  assert.equal(requests.length, 1);
+  requests[0].next(draftState(1));
+  timer.tick(500);
+  component.setDraftSpeed(1000);
+  assert.equal(timer.pending, 1);
+  timer.tick(999);
+  assert.equal(requests.length, 1);
+  timer.tick(1);
+  assert.equal(requests.length, 2);
+  component.setDraftSpeed(2000);
+  assert.equal(timer.pending, 0);
+  requests[1].next(draftState(2));
+  timer.tick(1999);
+  assert.equal(requests.length, 2);
+  timer.tick(1);
+  assert.equal(requests.length, 3);
+  requests[2].next(draftState(3, 'team-1'));
+  component.setDraftSpeed(3000);
+  assert.equal(timer.pending, 0);
+});
+
+test('pick team logos use supplied team data and names survive missing or failed logos', () => {
+  const { component } = setup();
+  component.teams = [
+    { id: 'team-1', name: 'Test team', logo_url: 'https://example.test/team.png' },
+    { id: 'team-2', name: 'Other team', logo_url: '' }
+  ];
+  assert.equal(component.draftTeamLogo('team-1'), 'https://example.test/team.png');
+  assert.equal(component.draftTeamLogo('team-2'), null);
+  assert.equal(component.draftTeamLogo('unknown'), null);
+  component.failedDraftTeamLogos.add('team-1');
+  assert.equal(component.draftTeamLogo('team-1'), null);
+  assert.equal(component.teamName('team-1'), 'Test team');
+  const template = fs.readFileSync(path.join(__dirname, '../src/app/app.component.html'), 'utf8');
+  assert.match(template, /draftTeamLogo\(pick.team_id\)/);
+  assert.match(template, /failedDraftTeamLogos.add\(pick.team_id\)/);
+  assert.doesNotMatch(template, /candidate.projected/);
+  assert.match(template, /Player inclusion does not confirm draft eligibility/);
+  assert.match(template, /ngModelChange\)="setDraftSpeed\(\$event\)"/);
+});
+
 test('a user pick pauses before the next automatic selection; completion leaves the recap', () => {
   const timer = clock();
   const { component, requests } = setup(timer);
   component.draftSelectedPlayerId = 'a';
   component.submitDraftPick();
   requests[0].next(draftState(1));
-  timer.tick(2499);
+  timer.tick(1999);
   assert.equal(requests.length, 1);
   timer.tick(1);
   assert.equal(requests.length, 2);
