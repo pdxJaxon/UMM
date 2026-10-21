@@ -97,6 +97,7 @@ class DraftRepository:
         ordered_ids = self._apply_reach_limit(
             draft, draft.controlled_team_id, ordered_ids, pick_number,
         )
+        pool = {player_id: pool[player_id] for player_id in ordered_ids}
         if self.prediction_provider is None:
             raise RuntimeError("AI recommendations are unavailable: LLM_API_KEY is not configured")
         candidates = self._candidate_context(ordered_ids, draft)
