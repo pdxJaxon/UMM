@@ -442,13 +442,13 @@ class DraftRepository:
         board_ranks = self._candidate_board_ranks(draft, team_id)
         rankings = snapshot_rankings(self.session, draft.prospect_snapshot_id)
         fallback_rank = max(board_ranks.values(), default=0)
-        for index, player_id in enumerate(candidates, 1):
+        missing_ids = [player_id for player_id in candidates if player_id not in board_ranks]
+        for index, player_id in enumerate(missing_ids, 1):
             source_rank = rankings.get(player_id)
-            board_ranks.setdefault(
-                player_id,
+            board_ranks[player_id] = (
                 source_rank.overall_rank
                 if source_rank is not None and not fallback_rank
-                else fallback_rank + index,
+                else fallback_rank + index
             )
         return candidates_within_team_need_reach(
             candidates,
