@@ -214,7 +214,13 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
   private recommendationRequest = 0;
   private draftAdvanceRequest = 0;
   private draftPickTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly draftPickDelayMs = 2500;
+  protected draftPickDelayMs: 1000 | 2000 | 3000 = 2000;
+  protected readonly draftSpeeds = [
+    { label: 'Slow', delayMs: 3000 },
+    { label: 'Medium', delayMs: 2000 },
+    { label: 'Fast', delayMs: 1000 }
+  ] as const;
+  protected readonly failedDraftTeamLogos = new Set<string>();
   private draggedPlayerId: string | null = null;
 
   private readonly apiBase = 'http://localhost:8000';
@@ -323,6 +329,19 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
   protected teamName(teamId: string): string {
     const team = this.teams.find((candidate) => candidate.id === teamId);
     return team?.name ?? teamId;
+  }
+
+  protected draftTeamLogo(teamId: string): string | null {
+    if (this.failedDraftTeamLogos.has(teamId)) return null;
+    return this.teams.find((team) => team.id === teamId)?.logo_url || null;
+  }
+
+  protected setDraftSpeed(delayMs: 1000 | 2000 | 3000): void {
+    this.draftPickDelayMs = delayMs;
+    if (this.draftPickTimer !== null && this.draftState) {
+      this.cancelDraftAdvance();
+      this.continueDraft(this.draftState);
+    }
   }
 
   protected setSelectedTeamRandomness(value: number): void {

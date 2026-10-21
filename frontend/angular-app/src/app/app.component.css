@@ -683,6 +683,34 @@ label,
   font-size: 12px;
 }
 
+.draft-pick-team {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.draft-team-logo {
+  flex-shrink: 0;
+  object-fit: contain;
+}
+
+.draft-speed {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.draft-speed select {
+  padding: 8px;
+  border: 1px solid #e1e7e3;
+  border-radius: 6px;
+  background: white;
+  font: inherit;
+}
+
 .draft-player {
   color: #65716e;
   min-width: 0;
