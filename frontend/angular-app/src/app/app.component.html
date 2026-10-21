@@ -45,7 +45,7 @@
         <select id="favorite-team" [(ngModel)]="favoriteTeamId">
           <option *ngFor="let team of teams" [value]="team.id">{{ team.name }}</option>
         </select>
-        <button class="action" (click)="saveFavoriteTeam()" [disabled]="savingFavoriteTeam || !favoriteTeamId || favoriteTeamId === preferredTeamId">
+        <button class="action" (click)="saveFavoriteTeam()" [disabled]="savingFavoriteTeam || boardDirty || savingBoard || !favoriteTeamId || favoriteTeamId === preferredTeamId">
           {{ savingFavoriteTeam ? 'Saving...' : 'Save team' }}
         </button>
         <span *ngIf="favoriteTeamMessage" class="preference-status">{{ favoriteTeamMessage }}</span>
@@ -72,7 +72,7 @@
         <p class="subhead">Every rank is a conversation between talent, need, tendencies, and evidence.</p>
       </div>
       <div class="board-action">
-        <span>{{ boardMode === 'personal' ? 'Reorder with the arrows or drag prospects, then save.' : 'Start with the team model, then make it yours.' }}</span>
+        <span>{{ boardMode === 'personal' ? 'Reorder with the arrows or drag prospects; changes save automatically.' : 'Start with the team model, then make it yours.' }}</span>
         <button class="action primary" (click)="completeBoardAction()" [disabled]="!boardActionEnabled || !!draftId">{{ boardActionLabel }}</button>
       </div>
     </section>
@@ -85,13 +85,13 @@
 
     <section class="control-strip" aria-label="Board controls">
       <label>TEAM
-        <select [(ngModel)]="selectedTeamId" (ngModelChange)="onTeamChange()" [disabled]="!!draftId || loading">
+        <select [(ngModel)]="selectedTeamId" (ngModelChange)="onTeamChange()" [disabled]="!!draftId || loading || boardDirty || savingBoard">
           <option *ngFor="let team of teams" [value]="team.id">{{ team.name }}</option>
         </select>
       </label>
       <div class="segmented">
-        <button [class.active]="boardMode === 'default'" (click)="setBoardMode('default')" [disabled]="!!draftId || loading">Default board</button>
-        <button [class.active]="boardMode === 'personal'" (click)="setBoardMode('personal')" [disabled]="!!draftId || loading">My board</button>
+        <button [class.active]="boardMode === 'default'" (click)="setBoardMode('default')" [disabled]="!!draftId || loading || boardDirty || savingBoard">Default board</button>
+        <button [class.active]="boardMode === 'personal'" (click)="setBoardMode('personal')" [disabled]="!!draftId || loading || boardDirty || savingBoard">My board</button>
       </div>
       <span class="status"><span class="status-dot"></span> {{ syncLabel }}</span>
     </section>
@@ -119,7 +119,7 @@
             <option *ngFor="let speed of draftSpeeds" [ngValue]="speed.delayMs">{{ speed.label }}</option>
           </select>
         </label>
-        <button class="action primary" (click)="startMockDraft()" [disabled]="startingDraft || !!draftId || !selectedTeamId || loading || confirmingBoardCopy">
+        <button class="action primary" (click)="startMockDraft()" [disabled]="startingDraft || !!draftId || !selectedTeamId || loading || confirmingBoardCopy || boardDirty || savingBoard">
           {{ startingDraft ? 'Starting...' : draftId ? 'Draft in progress' : 'Start mock draft' }}
         </button>
         <span *ngIf="draftRunMessage" class="preference-status">{{ draftRunMessage }}</span>

@@ -179,6 +179,9 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
   protected authMode: 'login' | 'register' = 'login';
   protected activeEntry: BoardEntry | null = null;
   protected saved = false;
+  protected savingBoard = false;
+  protected boardDirty = false;
+  protected boardSaveFailed = false;
   protected entries: BoardEntry[] = [];
   protected loading = false;
   protected confirmingBoardCopy = false;
@@ -373,7 +376,10 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
 
   protected get boardActionLabel(): string {
     if (this.boardMode === 'personal') {
-      return this.canSaveBoard ? (this.saved ? 'Saved' : 'Save changes') : 'Copy to edit';
+      if (!this.canSaveBoard) return 'Copy to edit';
+      if (this.savingBoard) return 'Saving...';
+      if (this.boardSaveFailed) return 'Retry save';
+      return this.saved ? 'Saved automatically' : 'Changes auto-save';
     }
     return this.entries.length > 0 ? 'Copy to My board' : 'Generate default board';
   }
@@ -381,7 +387,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
   protected get boardActionEnabled(): boolean {
     if (this.loading || this.confirmingBoardCopy) return false;
     if (this.boardMode === 'personal') {
-      return this.canSaveBoard;
+      return this.canSaveBoard && this.boardDirty && this.boardSaveFailed && !this.savingBoard;
     }
     return this.entries.length > 0 ? this.canCopyBoard : this.isAuthenticated;
   }
@@ -408,6 +414,9 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
     const request = ++this.boardRequest;
     this.confirmingBoardCopy = false;
     this.saved = false;
+    this.savingBoard = false;
+    this.boardDirty = false;
+    this.boardSaveFailed = false;
     if (!this.selectedTeamId) {
       this.loading = false;
       this.entries = [];
@@ -568,25 +577,58 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
       this.error = 'Copy the default board into My board before saving changes.';
       return;
     }
+    if (this.savingBoard) return;
+    this.boardDirty = true;
+    this.saved = false;
+    this.boardSaveFailed = false;
     this.error = null;
+    const boardId = this.boardId;
+    const teamId = this.selectedTeamId;
+    const authSession = this.authSession;
+    const playerIds = this.entries.map((entry) => entry.player_id);
+    this.savingBoard = true;
     this.http.put<{ version: number }>(
-      `${this.apiBase}/api/teams/${this.selectedTeamId}/board/${this.boardId}/order`,
-      { player_ids: this.entries.map((entry) => entry.player_id) },
-      this.requestOptions(true)
+    `${this.apiBase}/api/teams/${teamId}/board/${boardId}/order`,
+    { player_ids: playerIds },
+    this.requestOptions(true)
     ).subscribe({
       next: (response) => {
+        if (
+          this.boardId !== boardId
+          || this.selectedTeamId !== teamId
+          || this.boardMode !== 'personal'
+          || this.authSession !== authSession
+        ) return;
+        this.savingBoard = false;
         this.boardVersion = response.version;
+        const latestPlayerIds = this.entries.map((entry) => entry.player_id);
+        if (playerIds.length !== latestPlayerIds.length || playerIds.some((id, index) => id !== latestPlayerIds[index])) {
+          this.saveBoard();
+          return;
+        }
+        this.boardDirty = false;
+        this.boardSaveFailed = false;
         this.saved = true;
-        this.authMessage = 'Personal board saved.';
-        setTimeout(() => this.saved = false, 2200);
       },
       error: (error: HttpErrorResponse) => {
+        if (
+          this.boardId !== boardId
+          || this.selectedTeamId !== teamId
+          || this.boardMode !== 'personal'
+          || this.authSession !== authSession
+        ) return;
+        this.savingBoard = false;
+        this.boardSaveFailed = true;
         this.error = this.describeApiError(error, 'Unable to save your board order.');
       }
     });
   }
 
   protected logout(): void {
+    if (this.boardDirty || this.savingBoard) {
+      this.error = 'Save your personal board changes before signing out.';
+      return;
+    }
     this.cancelDraftAdvance();
     this.clearRecommendation();
     this.authSession += 1;
@@ -618,7 +660,10 @@ this.activeEntry = null;
   }
 
   protected saveFavoriteTeam(): void {
-    if (!this.isAuthenticated || !this.favoriteTeamId || this.favoriteTeamId === this.preferredTeamId) {
+    if (
+      !this.isAuthenticated || !this.favoriteTeamId || this.favoriteTeamId === this.preferredTeamId
+      || this.boardDirty || this.savingBoard
+    ) {
       return;
     }
 
@@ -918,6 +963,11 @@ this.activeEntry = null;
     this.activeEntry = selectedPlayerId
       ? this.entries.find((entry) => entry.player_id === selectedPlayerId) ?? this.entries[targetIndex] ?? null
       : this.entries[targetIndex] ?? null;
+    this.boardDirty = true;
+    this.saved = false;
+    this.boardSaveFailed = false;
+    this.error = null;
+    this.saveBoard();
   }
 
   private completeAuthentication(response: AuthResponse, message: string | null = null): void {

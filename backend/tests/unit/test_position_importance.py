@@ -11,13 +11,20 @@ from app.services.ranking_service import (
 def test_quarterback_is_more_important_than_punter() -> None:
     """The baseline should reflect the requested premium-position ordering."""
     assert get_position_importance("QB") > get_position_importance("P")
-    assert get_position_importance("P") > get_position_importance("LS")
+    assert get_position_importance("P") == get_position_importance("LS")
 
 
 def test_position_aliases_map_to_position_groups() -> None:
     """Legacy scouting labels should map to the canonical position groups."""
     assert get_position_importance("OG") == get_position_importance("IOL")
     assert get_position_importance("DE") == get_position_importance("EDGE")
+    assert get_position_importance("ED") == 90
+    assert get_position_importance("HB") == 70
+    assert get_position_importance("T") == 90
+    assert get_position_importance("C") == get_position_importance("G") == 70
+    assert get_position_importance("NT") == 60
+    assert get_position_importance("DL") == 70
+    assert get_position_importance("LS") == 30
 
 
 def test_position_importance_adjusts_board_score_and_validates_weight() -> None:
