@@ -340,8 +340,10 @@ test('pick team logos use supplied team data and names survive missing or failed
   assert.match(template, /draftTeamLogo\(pick.team_id\)/);
   assert.match(template, /failedDraftTeamLogos.add\(pick.team_id\)/);
   assert.doesNotMatch(template, /candidate.projected/);
-  assert.match(template, /Player inclusion does not confirm draft eligibility/);
+  assert.doesNotMatch(template, /prospect-notice|Player inclusion does not confirm draft eligibility/);
   assert.match(template, /ngModelChange\)="setDraftSpeed\(\$event\)"/);
+  assert.match(template, /<option \*ngFor="let speed of draftSpeeds" \[ngValue\]="speed\.delayMs">\{\{ speed\.label \}\}<\/option>/);
+  assert.doesNotMatch(template, /speed\.delayMs \/ 1000/);
 });
 
 test('a user pick pauses before the next automatic selection; completion leaves the recap', () => {

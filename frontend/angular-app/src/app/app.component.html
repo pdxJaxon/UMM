@@ -12,11 +12,6 @@
     <button class="profile" [attr.aria-label]="isAuthenticated ? 'Sign out' : 'Account controls'" (click)="isAuthenticated && logout()">{{ isAuthenticated ? 'ON' : 'UM' }}</button>
   </header>
 
-  <aside *ngIf="isAuthenticated" class="prospect-notice" aria-label="Prospect information">
-    <strong>Prospect information</strong>
-    Player inclusion does not confirm draft eligibility or declaration. Individual player status and rankings may change as new information becomes available.
-  </aside>
-
   <section class="account-bar" aria-label="Account controls">
     <ng-container *ngIf="!isAuthenticated; else signedIn">
       <div class="account-copy">
@@ -121,7 +116,7 @@
       <div class="randomness-action">
         <label class="draft-speed">Draft speed
           <select [ngModel]="draftPickDelayMs" (ngModelChange)="setDraftSpeed($event)">
-            <option *ngFor="let speed of draftSpeeds" [ngValue]="speed.delayMs">{{ speed.label }} · {{ speed.delayMs / 1000 }} seconds</option>
+            <option *ngFor="let speed of draftSpeeds" [ngValue]="speed.delayMs">{{ speed.label }}</option>
           </select>
         </label>
         <button class="action primary" (click)="startMockDraft()" [disabled]="startingDraft || !!draftId || !selectedTeamId || loading || confirmingBoardCopy">
