@@ -1,6 +1,6 @@
 """Tests for explainable team-specific draft scoring."""
 
-from app.services.draft_scoring import calculate_draft_score
+from app.services.draft_scoring import DraftScoreWeights, calculate_draft_score
 
 
 def test_draft_score_returns_component_breakdown() -> None:
@@ -46,3 +46,32 @@ def test_source_fallback_applies_concern_penalty_to_single_pass_iterables() -> N
     )
 
     assert breakdown.player_evaluation == 70
+
+
+def test_college_strength_is_an_explainable_five_percent_score_factor() -> None:
+    """Known schools use the issue scores; unknown schools receive a neutral score."""
+    alabama = calculate_draft_score(
+        player={"id": "a", "position": "QB", "college_id": "alabama"},
+        team_id="team-1", pick_number=1,
+        team_needs=[], tendencies=[], meetings=[], external_picks=[], concerns=[],
+        ranking_values={"pff": 80},
+    )
+    uab = calculate_draft_score(
+        player={"id": "b", "position": "QB", "college_id": "uab"},
+        team_id="team-1", pick_number=1,
+        team_needs=[], tendencies=[], meetings=[], external_picks=[], concerns=[],
+        ranking_values={"pff": 80},
+    )
+    unknown = calculate_draft_score(
+        player={"id": "c", "position": "QB", "college_id": "unknown-school"},
+        team_id="team-1", pick_number=1,
+        team_needs=[], tendencies=[], meetings=[], external_picks=[], concerns=[],
+        ranking_values={"pff": 80},
+    )
+
+    assert alabama.school_strength == 100
+    assert uab.school_strength == 40
+    assert unknown.school_strength == 50
+    assert alabama.final_score - uab.final_score == 3
+    assert DraftScoreWeights().player_evaluation == 0.40
+    assert DraftScoreWeights().school_strength == 0.05

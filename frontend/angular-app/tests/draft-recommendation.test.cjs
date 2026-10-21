@@ -189,6 +189,55 @@ test('copying loads persisted personal prospects and saving sends their exact ID
   assert.deepEqual(Array.from(requests[2].body.player_ids), ['pff-a']);
 });
 
+test('reordering a personal board autosaves and serializes changes made during a save', () => {
+  const { component, requests } = boardSetup();
+  component.boardMode = 'personal';
+  component.boardId = 50;
+  component.entries = [
+    { player_id: 'p1', name: 'One', rank: 1 },
+    { player_id: 'p2', name: 'Two', rank: 2 },
+    { player_id: 'p3', name: 'Three', rank: 3 }
+  ];
+  component.moveEntry(2, -1);
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].method, 'PUT');
+  assert.deepEqual(Array.from(requests[0].body.player_ids), ['p1', 'p3', 'p2']);
+  assert.equal(component.savingBoard, true);
+
+  component.moveEntry(1, -1);
+  assert.equal(requests.length, 1);
+  requests[0].next({ version: 2 });
+  assert.equal(requests.length, 2);
+  assert.deepEqual(Array.from(requests[1].body.player_ids), ['p3', 'p1', 'p2']);
+  requests[1].next({ version: 3 });
+  assert.equal(component.boardVersion, 3);
+  assert.equal(component.boardDirty, false);
+  assert.equal(component.saved, true);
+});
+
+test('failed board autosave shows the error and supports a manual retry', () => {
+  const { component, requests } = boardSetup();
+  component.boardMode = 'personal';
+  component.boardId = 50;
+  component.entries = [
+    { player_id: 'p1', name: 'One', rank: 1 },
+    { player_id: 'p2', name: 'Two', rank: 2 }
+  ];
+  component.moveEntry(1, -1);
+  requests[0].error({ error: { detail: 'Database unavailable' } });
+  assert.equal(component.boardSaveFailed, true);
+  assert.equal(component.boardDirty, true);
+  assert.equal(component.boardActionLabel, 'Retry save');
+  assert.match(component.error, /Database unavailable/);
+
+  component.completeBoardAction();
+  assert.equal(requests.length, 2);
+  assert.deepEqual(Array.from(requests[1].body.player_ids), ['p2', 'p1']);
+  requests[1].next({ version: 2 });
+  assert.equal(component.boardDirty, false);
+  assert.equal(component.boardSaveFailed, false);
+});
+
 test('existing custom board requires explicit confirmation and cancellation never writes', () => {
   const { component, requests } = boardSetup();
   component.copyBoard(true);

@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, asdict
 from typing import Any
 
+from app.db.college_strength_seed import COLLEGE_DRAFT_STRENGTH_SCORES
 from app.services.ranking_service import (
     calculate_adjusted_umm_ranking,
     calculate_external_mock_consensus,
@@ -21,7 +22,8 @@ from app.services.ranking_service import (
 class DraftScoreWeights:
     """Weights for the team-specific draft score components."""
 
-    player_evaluation: float = 0.45
+    player_evaluation: float = 0.40
+    school_strength: float = 0.05
     team_need: float = 0.20
     position_importance: float = 0.10
     team_tendency: float = 0.10
@@ -35,6 +37,7 @@ class DraftScoreBreakdown:
     """Auditable component values and final score for one candidate."""
 
     player_evaluation: float
+    school_strength: float
     team_need: float
     position_importance: float
     team_tendency: float
@@ -66,6 +69,8 @@ def calculate_draft_score(
         player_evaluation = max(float(player["source_evaluation"]) - calculate_derogatory_penalty(concerns), 0.0)
     else:
         player_evaluation = calculate_adjusted_umm_ranking(ranking_values, concerns)
+    college_id = str(player.get("college_id", "")).strip().lower()
+    school_strength = COLLEGE_DRAFT_STRENGTH_SCORES.get(college_id, 50.0)
     position = str(player.get("position", ""))
     position_adjusted = calculate_position_adjusted_ranking(player_evaluation, position)
     need = calculate_team_need_score(team_needs, position)
@@ -79,6 +84,7 @@ def calculate_draft_score(
     availability = 100.0 if player.get("is_available", True) else 0.0
     components = {
         "player_evaluation": player_evaluation,
+        "school_strength": school_strength,
         "team_need": need,
         "position_importance": position_adjusted,
         "team_tendency": tendency,

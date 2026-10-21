@@ -94,7 +94,7 @@ operator review is required.
 ### Preview, then apply
 
 Back up the database first. For PostgreSQL, apply migrations through
-`023_add_league_data_refreshes.sql`. For SQLite, run the schema-only initializer
+`024_update_position_importance.sql`. For SQLite, run the schema-only initializer
 shown in the prospect workflow below; do not reseed an existing database.
 
 ```powershell
@@ -137,8 +137,35 @@ Importing rankings and approving them for simulation are separate operations.
 Only members of an explicitly approved snapshot become available as projected
 prospects. Approval does not confirm eligibility or declaration.
 
+### 2027 team-needs CSV
+
+The issue 44 source is preserved in
+[`TeamNeeds_10212026.csv.csv`](./TeamNeeds/TeamNeeds_10212026.csv.csv).
+Apply the position-importance migration first, back up the database, and ensure
+an approved 2027 prospect snapshot with at least 32 available players exists.
+From `backend`, preview the import before applying it:
+
+```powershell
+..\.venv\Scripts\python.exe -m app.jobs.import_2027_team_needs --csv ..\data\TeamNeeds\TeamNeeds_10212026.csv.csv
+..\.venv\Scripts\python.exe -m app.jobs.import_2027_team_needs --csv ..\data\TeamNeeds\TeamNeeds_10212026.csv.csv --commit
+```
+
+The importer requires every NFL team and all 12 source position columns exactly
+once, validates scores from 0 to 10, and scales them to the 0-100 range used by
+the draft engine. It deactivates previous 2027 needs, stores the CSV values and
+source, then regenerates all 32 default boards in the same transaction. Personal
+boards and existing drafts are unchanged. `OG` and `OC` remain distinct need
+roles while both contribute to the interior-line position group.
+
+Program strength scores are stored in
+[`college_strength_seed.py`](../backend/app/db/college_strength_seed.py) and
+contribute 5% of a candidate's composite draft score; schools absent from that
+list receive a neutral score of 50. The conflicting UAB entries use the
+explicit UAB score of 40; the ambiguous duplicate “Mississippi” entries are
+omitted, while Ole Miss uses its explicitly listed score of 75.
+
 Before updating an existing database, take a backup. For PostgreSQL, apply
-migrations through `023_add_league_data_refreshes.sql` using the deployment
+migrations through `024_update_position_importance.sql` using the deployment
 migration process. For local SQLite, run the schema-only upgrade from `backend`
 to preserve existing reference data:
 

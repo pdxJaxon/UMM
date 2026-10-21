@@ -25,6 +25,8 @@ from app.services.draft_scoring import DraftScoreWeights, calculate_draft_score
 from app.services.draft_order import latest_league_refresh
 from app.services.prospect_pool import latest_projected_snapshot, pool_filter, snapshot_rankings
 
+DRAFT_SCORING_VERSION = "draft-score-v3-school-position"
+
 
 def generate_team_board(
     session: Session,
@@ -57,7 +59,7 @@ def generate_team_board(
         board_type=board_type,
         version=(previous_version or 0) + 1,
         generated_at=datetime.now(UTC),
-        scoring_version="draft-score-v2-source-fallback",
+        scoring_version=DRAFT_SCORING_VERSION,
         scoring_weights=weights.__dict__,
     )
     session.add(board)
