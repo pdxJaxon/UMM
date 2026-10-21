@@ -167,7 +167,14 @@ def import_2027_team_needs(
         for team_id in db_team_ids
     }
     boards_current = all(
-        board is not None and board.scoring_version == DRAFT_SCORING_VERSION
+        board is not None
+        and board.scoring_version == DRAFT_SCORING_VERSION
+        and any(entry.is_active for entry in board.entries)
+        and all(
+            entry.score_breakdown.get("source_snapshot_id") == snapshot.id
+            for entry in board.entries
+            if entry.is_active
+        )
         for board in latest_boards.values()
     )
     needs_current = (
