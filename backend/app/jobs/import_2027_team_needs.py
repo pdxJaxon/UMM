@@ -78,6 +78,8 @@ def parse_team_needs_csv(contents: str) -> list[dict[str, object]]:
     parsed: list[dict[str, object]] = []
     seen_teams: set[str] = set()
     for line_number, row in enumerate(reader, start=2):
+        if None in row:
+            raise ValueError(f"Unexpected extra columns on line {line_number}")
         team_name = (row.get("TEAM") or "").strip().casefold()
         team_id = TEAM_ALIASES.get(team_name)
         if team_id is None:
