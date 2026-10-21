@@ -1,5 +1,6 @@
 """Contract-level tests for the mock draft lifecycle."""
 
+import json
 from datetime import UTC, datetime
 
 import pytest
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from app.core.security import create_access_token
 from app.db.initialize import PLAYERS, TEAMS
-from app.db.models import DraftPickRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamDraftingTendencyRecord, TeamRecord, UserRecord
+from app.db.models import DraftPickRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamDraftingTendencyRecord, TeamNeedRecord, TeamRecord, UserRecord
 from app.db.session import Base, get_db
 from app.main import app
 from app.services.draft_repository import DraftRepository
@@ -432,8 +433,9 @@ def test_auto_simulation_uses_llm_and_persists_provenance(isolate_draft_store: S
         model_name = "test-model"
 
         def complete(self, prompt: str, randomness: float):
+            candidate_id = json.loads(prompt)["candidates"][0]["player_id"]
             return {
-                "selected_player_id": "player-2",
+                "selected_player_id": candidate_id,
                 "confidence": 0.81,
                 "alternatives": [],
                 "reasoning_factors": ["team fit"],
@@ -522,3 +524,55 @@ def test_auto_simulation_uses_latest_team_board_order(isolate_draft_store: Sessi
 
     assert response.status_code == 200
     assert response.json()["picks"][0]["player_id"] == "player-3"
+
+
+def test_auto_simulation_reaches_for_a_high_need_within_the_round_limit(isolate_draft_store: Session) -> None:
+    """A reachable high-need prospect is prioritized, while BPA remains an option."""
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer " + create_access_token("user-1")}
+    session = isolate_draft_store
+    need_prospect = session.get(PlayerRecord, "player-1")
+    assert need_prospect is not None
+    need_prospect.position = "WR"
+
+    board = TeamBoardRecord(
+        team_id="team-1",
+        draft_year=2026,
+        board_type="default",
+        version=1,
+        generated_at=datetime.now(UTC),
+        scoring_version="test",
+        scoring_weights={},
+    )
+    session.add(board)
+    session.flush()
+    session.add_all([
+        TeamBoardEntryRecord(
+            board_id=board.id, player_id="player-3", rank_position=1,
+            score=99, score_breakdown={},
+        ),
+        TeamBoardEntryRecord(
+            board_id=board.id, player_id=need_prospect.id, rank_position=13,
+            score=90, score_breakdown={},
+        ),
+        TeamNeedRecord(
+            team_id="team-1", draft_year=2026, position_code="WR",
+            role_level="starter", need_score=70, source_name="test",
+            observed_at=datetime.now(UTC).replace(tzinfo=None),
+        ),
+    ])
+    session.commit()
+
+    created = client.post(
+        "/api/drafts",
+        json={
+            "controlled_team_id": "team-2", "draft_year": 2026,
+            "randomness_overrides": {"team-1": 0},
+        },
+        headers=headers,
+    )
+    draft_id = created.json()["draft_run_id"]
+    response = client.post(f"/api/drafts/{draft_id}/auto-simulate", headers=headers)
+
+    assert response.status_code == 200
+    assert response.json()["picks"][0]["player_id"] == need_prospect.id

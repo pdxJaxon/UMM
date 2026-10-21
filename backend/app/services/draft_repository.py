@@ -11,7 +11,10 @@ from app.core.config import settings
 from app.db.models import CollegeRecord, DraftPickRecord, DraftRunRecord, DraftTradeRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, TeamNeedRecord
 from app.services.llm_prediction import OpenAICompatiblePredictionProvider, PredictionContext, PredictionProvider, predict_pick
 from app.services.leadership_tendencies import get_effective_tendencies
-from app.services.ranking_service import select_with_team_randomness
+from app.services.ranking_service import (
+    candidates_within_team_need_reach,
+    select_with_team_randomness,
+)
 from app.services.trade_engine import evaluate_trade
 from app.services.prospect_pool import latest_projected_snapshot, pool_filter, snapshot_rankings
 from app.db.college_seed import college_logo_url
@@ -90,13 +93,18 @@ class DraftRepository:
         ordered_ids.extend(player_id for player_id in pool if player_id not in ordered_ids)
         if not ordered_ids:
             raise ValueError("No available prospects remain for a recommendation")
+        available_ranks = {player_id: rank for rank, player_id in enumerate(ordered_ids, 1)}
+        ordered_ids = self._apply_reach_limit(
+            draft, draft.controlled_team_id, ordered_ids, pick_number,
+        )
+        pool = {player_id: pool[player_id] for player_id in ordered_ids}
         if self.prediction_provider is None:
             raise RuntimeError("AI recommendations are unavailable: LLM_API_KEY is not configured")
         candidates = self._candidate_context(ordered_ids, draft)
-        for rank, candidate in enumerate(candidates, 1):
+        for candidate in candidates:
             player = pool[str(candidate["player_id"])]
             candidate.update({
-                "rank": rank,
+                "rank": available_ranks[str(candidate["player_id"])],
                 "name": f"{player['first_name']} {player['last_name']}",
                 "college_name": player["college_name"],
             })
@@ -208,6 +216,8 @@ class DraftRepository:
                 ]
             if not remaining:
                 raise ValueError("No available prospects remain before the first round is complete")
+            pick_number = len(picks) + 1
+            remaining = self._apply_reach_limit(draft, team_id, remaining, pick_number)
             team = self.session.get(TeamRecord, team_id)
             baseline = float(team.randomness_score or 0) if team else 50.0
             randomness = self._effective_randomness(
@@ -222,7 +232,7 @@ class DraftRepository:
                         team_id=team_id,
                         team_name=team.name if team else team_id,
                         draft_year=draft.draft_year,
-                        pick_number=len(picks) + 1,
+                        pick_number=pick_number,
                         candidates=tuple(self._candidate_context(remaining, draft)),
                         team_needs=tuple(self._team_needs(team_id, draft.draft_year)),
                         team_tendencies=tuple(self._cached_team_tendencies(team_id, draft.draft_year, tendency_cache)),
@@ -411,6 +421,78 @@ class DraftRepository:
                 or entry.score_breakdown.get("source_snapshot_id") == draft.prospect_snapshot_id
             )
         ]
+
+    def _apply_reach_limit(
+        self,
+        draft: DraftRunRecord,
+        team_id: str,
+        candidates: list[str],
+        pick_number: int,
+    ) -> list[str]:
+        """Restrict engine choices to a reachable need prospect and the BPA."""
+        if not candidates:
+            return []
+        round_number = (pick_number - 1) // len(TEAM_ORDER) + 1
+        positions = dict(
+            self.session.execute(
+                select(PlayerRecord.id, PlayerRecord.position)
+                .where(PlayerRecord.id.in_(candidates))
+            ).all()
+        )
+        board_ranks = self._candidate_board_ranks(draft, team_id)
+        rankings = snapshot_rankings(self.session, draft.prospect_snapshot_id)
+        fallback_rank = max(board_ranks.values(), default=0)
+        missing_ids = [player_id for player_id in candidates if player_id not in board_ranks]
+        for index, player_id in enumerate(missing_ids, 1):
+            source_rank = rankings.get(player_id)
+            board_ranks[player_id] = (
+                source_rank.overall_rank
+                if source_rank is not None and not fallback_rank
+                else fallback_rank + index
+            )
+        return candidates_within_team_need_reach(
+            candidates,
+            positions,
+            board_ranks,
+            self._team_needs(team_id, draft.draft_year),
+            round_number,
+        )
+
+    def _candidate_board_ranks(
+        self,
+        draft: DraftRunRecord,
+        team_id: str,
+    ) -> dict[str, int]:
+        """Return active default-board ranks for this team's eligible players."""
+        board = self.session.scalar(
+            select(TeamBoardRecord)
+            .where(
+                TeamBoardRecord.team_id == team_id,
+                TeamBoardRecord.draft_year == draft.draft_year,
+                TeamBoardRecord.board_type == "default",
+            )
+            .order_by(TeamBoardRecord.version.desc())
+            .limit(1)
+        )
+        if board is None:
+            return {}
+        entries = self.session.scalars(
+            select(TeamBoardEntryRecord)
+            .join(PlayerRecord, PlayerRecord.id == TeamBoardEntryRecord.player_id)
+            .where(
+                TeamBoardEntryRecord.board_id == board.id,
+                TeamBoardEntryRecord.is_active.is_(True),
+                pool_filter(draft.draft_year, draft.prospect_snapshot_id),
+            )
+        ).all()
+        return {
+            entry.player_id: entry.rank_position
+            for entry in entries
+            if (
+                draft.prospect_snapshot_id is None
+                or entry.score_breakdown.get("source_snapshot_id") == draft.prospect_snapshot_id
+            )
+        }
 
     def _next_id(self, prefix: str) -> str:
         """Generate a collision-resistant identifier within the current database."""

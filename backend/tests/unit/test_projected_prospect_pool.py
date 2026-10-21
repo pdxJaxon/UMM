@@ -355,7 +355,10 @@ def test_recommendation_is_advisory_and_uses_available_persisted_evidence(sessio
             assert payload["draft"]["team_id"] == controlled_team
             return {
                 "selected_player_id": candidates[0]["player_id"], "confidence": .8,
-                "alternatives": [{"player_id": candidates[1]["player_id"], "score": .7}],
+                "alternatives": (
+                    [{"player_id": candidates[1]["player_id"], "score": .7}]
+                    if len(candidates) > 1 else []
+                ),
                 "reasoning_factors": ["Highest available source rank"], "evidence": ["source_rank"],
             }
 
@@ -363,10 +366,14 @@ def test_recommendation_is_advisory_and_uses_available_persisted_evidence(sessio
     suggestion = repository.recommend(draft)
     assert suggestion["pick_number"] == len(before) + 1
     assert suggestion["recommended"]["rank"] == 1
-    assert suggestion["alternatives"][0]["player_id"] != suggestion["recommended"]["player_id"]
+    assert all(
+        alternative["player_id"] != suggestion["recommended"]["player_id"]
+        for alternative in suggestion["alternatives"]
+    )
     assert repository.state(draft)["picks"] == before
     assert draft.status == "drafting"
-    repository.add_pick(draft, controlled_team, suggestion["alternatives"][0]["player_id"], "USER")
+    user_pick = suggestion["alternatives"][0] if suggestion["alternatives"] else suggestion["recommended"]
+    repository.add_pick(draft, controlled_team, user_pick["player_id"], "USER")
     repository.prediction_provider = None
     repository.auto_simulate(draft)
     completed = repository.state(draft)
