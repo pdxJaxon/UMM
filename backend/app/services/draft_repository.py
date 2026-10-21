@@ -433,11 +433,12 @@ class DraftRepository:
         if not candidates:
             return []
         round_number = (pick_number - 1) // len(TEAM_ORDER) + 1
-        positions = {
-            player_id: player.position
-            for player_id in candidates
-            if (player := self.session.get(PlayerRecord, player_id)) is not None
-        }
+        positions = dict(
+            self.session.execute(
+                select(PlayerRecord.id, PlayerRecord.position)
+                .where(PlayerRecord.id.in_(candidates))
+            ).all()
+        )
         board_ranks = self._candidate_board_ranks(draft, team_id)
         rankings = snapshot_rankings(self.session, draft.prospect_snapshot_id)
         fallback_rank = max(board_ranks.values(), default=0)
