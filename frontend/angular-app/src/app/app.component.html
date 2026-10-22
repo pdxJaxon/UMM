@@ -175,7 +175,7 @@
           <p class="eyebrow">YOUR PICK / {{ draft.current_pick_number | number:'2.0-0' }}</p>
           <label for="draft-player">Select an eligible draft prospect <span *ngIf="draftSelectionIsOverride">(manual override)</span></label>
         </div>
-        <select id="draft-player" [(ngModel)]="draftSelectedPlayerId" [disabled]="draftBusy || !recommendation || draftCandidates.length === 0">
+        <select id="draft-player" [(ngModel)]="draftSelectedPlayerId" (ngModelChange)="chooseRecommendation($event)" [disabled]="draftBusy || !recommendation || draftCandidates.length === 0">
           <option *ngFor="let candidate of draftCandidates" [value]="candidate.player_id">
             {{ candidate.rank | number:'2.0-0' }} · {{ candidate.name }} · {{ candidate.position }} · {{ candidate.school }}
           </option>

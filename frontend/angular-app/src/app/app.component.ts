@@ -220,6 +220,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
   protected draftError: string | null = null;
   protected draftBusy = false;
   protected draftSelectedPlayerId = '';
+  protected draftOverrideIntent = false;
   protected recommendation: DraftRecommendation | null = null;
   protected recommendationLoading = false;
   protected recommendationError: string | null = null;
@@ -338,9 +339,7 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
   }
 
   protected get draftSelectionIsOverride(): boolean {
-    return !!this.recommendation
-      && !!this.draftSelectedPlayerId
-      && this.draftSelectedPlayerId !== this.recommendation.recommended.player_id;
+    return this.draftOverrideIntent;
   }
 
   protected get currentDraftTeamName(): string {
@@ -810,13 +809,21 @@ this.activeEntry = null;
     if (!state || !this.draftOnControlledTeam || !this.recommendation
       || !this.draftSelectedPlayerId || this.draftBusy) return;
 
+    const selectedPlayerId = this.draftSelectedPlayerId;
+    const manualOverride = this.draftSelectionIsOverride;
+    const reviewedRecommendationId = this.recommendation.recommended.player_id;
     this.clearRecommendation();
     this.draftBusy = true;
     this.draftError = null;
     const authSession = this.authSession;
     this.http.post<DraftStateResponse>(
       `${this.apiBase}/api/drafts/${state.draft_run.id}/picks`,
-      { team_id: state.draft_run.controlled_team_id, player_id: this.draftSelectedPlayerId },
+      {
+        team_id: state.draft_run.controlled_team_id,
+        player_id: selectedPlayerId,
+        reviewed_recommendation_id: reviewedRecommendationId,
+        manual_override: manualOverride
+      },
       this.requestOptions(true)
     ).subscribe({
       next: (updatedState) => {
@@ -827,6 +834,23 @@ this.activeEntry = null;
       error: (error: HttpErrorResponse) => {
         if (authSession !== this.authSession) return;
         this.draftBusy = false;
+        const detail = error.error?.detail;
+        const changed = detail?.recommendation as DraftRecommendation | undefined;
+        const available = new Set(this.draftCandidates.map((candidate) => candidate.player_id));
+        if (error.status === 409 && detail?.code === 'recommendation_changed' && changed
+          && changed.draft_run_id === state.draft_run.id
+          && changed.team_id === state.current_team_id
+          && changed.pick_number === state.current_pick_number
+          && available.has(changed.recommended.player_id)
+          && changed.alternatives.every((candidate) => available.has(candidate.player_id))) {
+          this.recommendation = changed;
+          this.draftSelectedPlayerId = manualOverride
+            ? selectedPlayerId
+            : changed.recommended.player_id;
+          this.draftOverrideIntent = manualOverride;
+          this.recommendationNotice = 'The LLM decision changed. Review the updated decision and confirm your pick.';
+          return;
+        }
         this.draftError = this.describeApiError(error, 'Unable to submit your pick.');
         this.loadRecommendation();
       }
@@ -951,6 +975,7 @@ this.activeEntry = null;
         }
         this.recommendation = result;
         this.draftSelectedPlayerId = result.recommended.player_id;
+        this.draftOverrideIntent = false;
       },
       error: (error: HttpErrorResponse) => {
         if (request !== this.recommendationRequest || authSession !== this.authSession) return;
@@ -968,12 +993,14 @@ this.activeEntry = null;
     if (!this.recommendation || !this.draftOnControlledTeam || this.draftBusy) return;
     if (this.draftCandidates.some((candidate) => candidate.player_id === playerId)) {
       this.draftSelectedPlayerId = playerId;
+      this.draftOverrideIntent = playerId !== this.recommendation.recommended.player_id;
     }
   }
 
   private clearRecommendation(): void {
     this.recommendationRequest += 1;
     this.recommendation = null;
+    this.draftOverrideIntent = false;
     this.recommendationError = null;
     this.recommendationNotice = null;
     this.recommendationLoading = false;

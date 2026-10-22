@@ -54,7 +54,41 @@ test('recommendation and advisory selection never submit a pick', () => {
   component.submitDraftPick();
   assert.equal(requests[1].url, 'http://localhost:8000/api/drafts/draft-1/picks');
   assert.equal(requests[1].body.player_id, 'b');
+  assert.equal(requests[1].body.reviewed_recommendation_id, 'a');
+  assert.equal(requests[1].body.manual_override, true);
   assert.equal(component.recommendation, null);
+});
+
+test('changed decisions require confirmation without losing explicit override intent', () => {
+  for (const manualOverride of [false, true]) {
+    const { component, requests, suggestion } = setup();
+    component.loadRecommendation();
+    requests[0].next(suggestion);
+    if (manualOverride) component.chooseRecommendation('b');
+    component.submitDraftPick();
+    requests[1].error({
+      status: 409,
+      error: {
+        detail: {
+          code: 'recommendation_changed',
+          manual_override: manualOverride,
+          recommendation: {
+            ...suggestion,
+            recommended: { player_id: 'b' },
+            alternatives: []
+          }
+        }
+      }
+    });
+
+    assert.equal(component.recommendation.recommended.player_id, 'b');
+    assert.equal(component.draftSelectedPlayerId, 'b');
+    assert.equal(component.draftSelectionIsOverride, manualOverride);
+    assert.match(component.recommendationNotice, /decision changed.*confirm/i);
+    component.submitDraftPick();
+    assert.equal(requests[2].body.reviewed_recommendation_id, 'b');
+    assert.equal(requests[2].body.manual_override, manualOverride);
+  }
 });
 
 test('selected players and responses for the wrong pick are rejected', () => {
