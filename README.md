@@ -104,6 +104,11 @@ is the default selection; choosing another eligible player is an explicit
 manual override. The server obtains a fresh LLM decision when the pick is
 submitted and records that decision alongside the final selection.
 
+The backend trusts the operating system certificate store (via `truststore`), so
+LLM calls work behind TLS-inspecting corporate proxies. If a network filter
+redirects `api.openai.com` (for example an HTTP 307 to a security gateway), ask IT
+to allow it or point `LLM_API_URL` at an approved OpenAI-compatible endpoint.
+
 The displayed rank is the available pool's UMM default-board order followed by
 pinned source order, not a personalized-board rank. Source consensus rank is
 shown separately. Confidence and explanations are model output, not verified
