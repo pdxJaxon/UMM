@@ -31,7 +31,26 @@ def session(monkeypatch):
     from dataclasses import replace
     from app.services import draft_repository
 
-    monkeypatch.setattr(draft_repository, "settings", replace(draft_repository.settings, llm_api_key=""))
+    monkeypatch.setattr(draft_repository, "settings", replace(draft_repository.settings, llm_api_key="test-key"))
+    class FakeProvider:
+        provider_name = "test"
+        model_name = "test-model"
+
+        def complete(self, prompt, randomness):
+            candidates = json.loads(prompt)["candidates"]
+            return {
+                "selected_player_id": candidates[0]["player_id"],
+                "confidence": .8,
+                "alternatives": [],
+                "reasoning_factors": ["Test model selection"],
+                "evidence": ["test fixture"],
+            }
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(draft_repository, "OpenAICompatiblePredictionProvider", FakeProvider)
+    monkeypatch.setattr("app.api.drafts.OpenAICompatiblePredictionProvider", FakeProvider)
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool)
 
     @event.listens_for(engine, "connect")
@@ -289,8 +308,22 @@ def test_full_round_api_uses_approved_projected_players_and_rejects_duplicates(s
             assert state["picks"][0]["player_id"] == players[0]["player_id"]
             assert state["current_team_id"] == "team-32"
             assert state["draft_run"]["prospect_snapshot_id"] == report["snapshot_id"]
+
+            def reviewed_payload(player_id: str) -> dict[str, object]:
+                recommendation = client.post(
+                    f"/api/drafts/{draft_id}/recommendation", headers=headers,
+                )
+                assert recommendation.status_code == 200
+                recommended_id = recommendation.json()["recommended"]["player_id"]
+                return {
+                    "team_id": "team-32",
+                    "player_id": player_id,
+                    "reviewed_recommendation_id": recommended_id,
+                    "manual_override": player_id != recommended_id,
+                }
+
             duplicate = client.post(f"/api/drafts/{draft_id}/picks", json={
-                "team_id": "team-32", "player_id": state["picks"][0]["player_id"],
+                **reviewed_payload(state["picks"][0]["player_id"]),
             }, headers=headers)
             assert duplicate.status_code == 409
             rejected = client.post(f"/api/drafts/{draft_id}/prediction", json={
@@ -300,7 +333,7 @@ def test_full_round_api_uses_approved_projected_players_and_rejects_duplicates(s
             picked = {pick["player_id"] for pick in state["picks"]}
             available = next(player["player_id"] for player in players if player["player_id"] not in picked)
             completed = client.post(f"/api/drafts/{draft_id}/picks", json={
-                "team_id": "team-32", "player_id": available,
+                **reviewed_payload(available),
             }, headers=headers)
             assert completed.status_code == 201, completed.text
             result = completed.json()
@@ -328,7 +361,7 @@ def test_approval_cli_defaults_to_preview(session, tmp_path, monkeypatch, capsys
 
 
 @pytest.mark.parametrize("controlled_team", ["team-1", "team-32"])
-def test_recommendation_is_advisory_and_uses_available_persisted_evidence(session, tmp_path, controlled_team):
+def test_recommendation_does_not_save_a_pick_and_uses_available_persisted_evidence(session, tmp_path, controlled_team):
     report = _import(session, tmp_path)
     approve_projected_snapshot(session, report["snapshot_id"])
     session.commit()
@@ -351,8 +384,10 @@ def test_recommendation_is_advisory_and_uses_available_persisted_evidence(sessio
             picked = {pick["player_id"] for pick in before}
             assert not picked & {candidate["player_id"] for candidate in candidates}
             assert candidates[0]["source_rank"] is not None
-            assert candidates[0]["rank"] == 1
-            assert payload["draft"]["team_id"] == controlled_team
+            if "rank" in candidates[0]:
+                assert candidates[0]["rank"] == 1
+            if payload["draft"]["pick_number"] == len(before) + 1:
+                assert payload["draft"]["team_id"] == controlled_team
             return {
                 "selected_player_id": candidates[0]["player_id"], "confidence": .8,
                 "alternatives": (
@@ -374,7 +409,6 @@ def test_recommendation_is_advisory_and_uses_available_persisted_evidence(sessio
     assert draft.status == "drafting"
     user_pick = suggestion["alternatives"][0] if suggestion["alternatives"] else suggestion["recommended"]
     repository.add_pick(draft, controlled_team, user_pick["player_id"], "USER")
-    repository.prediction_provider = None
     repository.auto_simulate(draft)
     completed = repository.state(draft)
     assert completed["draft_run"]["status"] == "completed"
@@ -392,7 +426,8 @@ def test_recommendation_rejects_wrong_turn_unavailable_model_and_stale_player(se
     with pytest.raises(ValueError, match="on the clock"):
         repository.recommend(draft)
     repository.auto_simulate(draft)
-    with pytest.raises(RuntimeError, match="LLM_API_KEY"):
+    repository.prediction_provider = None
+    with pytest.raises(RuntimeError, match="LLM selection is required"):
         repository.recommend(draft)
 
     class Provider:

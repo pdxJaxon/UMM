@@ -2,19 +2,20 @@
 
 from __future__ import annotations
 
-import random
-
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.db.models import CollegeRecord, DraftPickRecord, DraftRunRecord, DraftTradeRecord, PlayerRecord, TeamBoardEntryRecord, TeamBoardRecord, TeamRecord, TeamNeedRecord
-from app.services.llm_prediction import OpenAICompatiblePredictionProvider, PredictionContext, PredictionProvider, predict_pick
-from app.services.leadership_tendencies import get_effective_tendencies
-from app.services.ranking_service import (
-    candidates_within_team_need_reach,
-    select_with_team_randomness,
+from app.services.llm_prediction import (
+    OpenAICompatiblePredictionProvider,
+    PredictionContext,
+    PredictionProvider,
+    RecommendationNotConfiguredError,
+    predict_pick,
 )
+from app.services.leadership_tendencies import get_effective_tendencies
+from app.services.ranking_service import candidates_within_team_need_reach
 from app.services.trade_engine import evaluate_trade
 from app.services.prospect_pool import latest_projected_snapshot, pool_filter, snapshot_rankings
 from app.db.college_seed import college_logo_url
@@ -99,7 +100,7 @@ class DraftRepository:
         )
         pool = {player_id: pool[player_id] for player_id in ordered_ids}
         if self.prediction_provider is None:
-            raise RuntimeError("AI recommendations are unavailable: LLM_API_KEY is not configured")
+            raise RecommendationNotConfiguredError("LLM selection is required, but no prediction provider is configured")
         candidates = self._candidate_context(ordered_ids, draft)
         for candidate in candidates:
             player = pool[str(candidate["player_id"])]
@@ -152,6 +153,8 @@ class DraftRepository:
             "alternatives": [by_id[player_id] for player_id in alternative_ids],
             "confidence": result.confidence, "reasoning_factors": result.reasoning_factors,
             "evidence": result.evidence, "provider": result.provider, "model": result.model,
+            "prompt_version": result.prompt_version, "randomness": result.randomness,
+            "candidates": candidates,
             "rank_basis": "UMM default board, then pinned source order",
         }
 
@@ -219,42 +222,43 @@ class DraftRepository:
             pick_number = len(picks) + 1
             remaining = self._apply_reach_limit(draft, team_id, remaining, pick_number)
             team = self.session.get(TeamRecord, team_id)
-            baseline = float(team.randomness_score or 0) if team else 50.0
-            randomness = self._effective_randomness(
-                draft.overall_randomness,
-                draft.randomness_overrides.get(team_id, baseline),
-            )
-            source = "FALLBACK"
-            metadata: dict[str, object] = {"mode": "deterministic-fallback"}
-            if self.prediction_provider is not None:
-                prediction = predict_pick(
-                    PredictionContext(
-                        team_id=team_id,
-                        team_name=team.name if team else team_id,
-                        draft_year=draft.draft_year,
-                        pick_number=pick_number,
-                        candidates=tuple(self._candidate_context(remaining, draft)),
-                        team_needs=tuple(self._team_needs(team_id, draft.draft_year)),
-                        team_tendencies=tuple(self._cached_team_tendencies(team_id, draft.draft_year, tendency_cache)),
-                        overall_randomness=float(draft.overall_randomness),
-                        team_randomness=float(draft.randomness_overrides.get(team_id, team.randomness_score or 50)) if team else 50,
-                    ),
-                    self.prediction_provider,
+            if self.prediction_provider is None:
+                raise RecommendationNotConfiguredError(
+                    "LLM selection is required, but no prediction provider is configured"
                 )
-                player_id = prediction.selected_player_id
-                applied_randomness = prediction.randomness
-                source = "LLM"
-                metadata = {
-                    "provider": prediction.provider,
-                    "model": prediction.model,
-                    "prompt_version": prediction.prompt_version,
-                    "confidence": prediction.confidence,
-                    "alternatives": prediction.alternatives,
-                    "reasoning_factors": prediction.reasoning_factors,
-                    "evidence": prediction.evidence,
-                }
-            else:
-                player_id, applied_randomness = select_with_team_randomness(remaining, randomness, random.Random())
+            candidates = self._candidate_context(remaining, draft)
+            prediction = predict_pick(
+                PredictionContext(
+                    team_id=team_id,
+                    team_name=team.name if team else team_id,
+                    draft_year=draft.draft_year,
+                    pick_number=pick_number,
+                    candidates=tuple(candidates),
+                    team_needs=tuple(self._team_needs(team_id, draft.draft_year)),
+                    team_tendencies=tuple(self._cached_team_tendencies(team_id, draft.draft_year, tendency_cache)),
+                    overall_randomness=float(draft.overall_randomness),
+                    team_randomness=float(draft.randomness_overrides.get(team_id, team.randomness_score or 50)) if team else 50,
+                ),
+                self.prediction_provider,
+            )
+            player_id = prediction.selected_player_id
+            applied_randomness = prediction.randomness
+            source = "LLM"
+            metadata: dict[str, object] = {
+                "mode": "llm",
+                "provider": prediction.provider,
+                "model": prediction.model,
+                "prompt_version": prediction.prompt_version,
+                "confidence": prediction.confidence,
+                "llm_selected_player_id": prediction.selected_player_id,
+                "selected_player_id": prediction.selected_player_id,
+                "manual_override": False,
+                "randomness": prediction.randomness,
+                "alternatives": prediction.alternatives,
+                "reasoning_factors": prediction.reasoning_factors,
+                "evidence": prediction.evidence,
+                "candidates": candidates,
+            }
             self.add_pick(draft, team_id, player_id, source, applied_randomness, metadata)
             picks = self._ordered_picks(draft.id)
 

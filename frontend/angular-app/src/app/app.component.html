@@ -147,7 +147,7 @@
       <div *ngIf="draftBusy" class="draft-status" role="status" aria-live="polite">Draft in progress. Automated picks arrive one at a time, at least {{ draftPickDelayMs / 1000 }} seconds apart.</div>
 
       <section *ngIf="draftOnControlledTeam" class="recommendation-panel" aria-label="Engine recommendation" aria-live="polite">
-        <p class="eyebrow">ENGINE RECOMMENDATION / ADVISORY ONLY</p>
+        <p class="eyebrow">REQUIRED LLM PICK DECISION</p>
         <p *ngIf="recommendationLoading" role="status">Reviewing available prospects and team evidence...</p>
         <p *ngIf="recommendationNotice" role="status">{{ recommendationNotice }}</p>
         <p *ngIf="recommendationError" class="draft-error" role="alert">{{ recommendationError }}</p>
@@ -156,31 +156,31 @@
           <p>Available-pool rank {{ suggestion.recommended.rank }} · {{ suggestion.recommended.position }} · {{ suggestion.recommended.college_name ?? 'School unavailable' }}</p>
           <p *ngIf="suggestion.recommended.source_rank != null">Source board rank {{ suggestion.recommended.source_rank }}</p>
           <p *ngIf="suggestion.recommended.is_projected">Projected prospect; eligibility and declaration are unconfirmed.</p>
-          <p>Model confidence: {{ suggestion.confidence | percent:'1.0-0' }} · {{ suggestion.model }}</p>
+          <p>Model confidence: {{ suggestion.confidence | percent:'1.0-0' }} · {{ suggestion.model }} · {{ suggestion.provider }}</p>
           <ul><li *ngFor="let reason of suggestion.reasoning_factors">{{ reason }}</li></ul>
           <p *ngIf="!suggestion.reasoning_factors.length">The model supplied no explanation.</p>
           <p *ngIf="suggestion.evidence.length">Model-cited evidence: {{ suggestion.evidence.join('; ') }}</p>
-          <small>Rank basis: {{ suggestion.rank_basis }}. AI explanations are advisory, not verified scouting facts.</small>
+          <small>Rank basis: {{ suggestion.rank_basis }}. Model explanations are not verified scouting facts. The server requests a fresh decision when you submit.</small>
           <div class="recommendation-actions">
             <button class="action" (click)="chooseRecommendation(suggestion.recommended.player_id)" [disabled]="draftBusy">Choose {{ suggestion.recommended.name }}</button>
             <button *ngFor="let alternative of suggestion.alternatives" class="action" (click)="chooseRecommendation(alternative.player_id)" [disabled]="draftBusy">Alternative: {{ alternative.name }} · rank {{ alternative.rank }}</button>
           </div>
-          <p>Choosing a prospect only fills the selector below. Press Make pick to confirm, or select anyone else.</p>
+          <p>Choosing a prospect only fills the selector below. Select a different eligible prospect to explicitly override the model.</p>
         </ng-container>
-        <button *ngIf="!recommendationNotice" class="text-button" (click)="loadRecommendation()" [disabled]="recommendationLoading || draftBusy">{{ recommendationError ? 'Retry recommendation' : 'Refresh recommendation' }}</button>
+        <button class="text-button" (click)="loadRecommendation()" [disabled]="recommendationLoading || draftBusy">{{ recommendationError || recommendationNotice ? 'Retry LLM decision' : (recommendation ? 'Get a new LLM decision' : 'Request LLM decision') }}</button>
       </section>
 
       <div *ngIf="draft.draft_run.status === 'drafting' && draftOnControlledTeam" class="draft-on-clock">
         <div>
           <p class="eyebrow">YOUR PICK / {{ draft.current_pick_number | number:'2.0-0' }}</p>
-          <label for="draft-player">Select an eligible draft prospect</label>
+          <label for="draft-player">Select an eligible draft prospect <span *ngIf="draftSelectionIsOverride">(manual override)</span></label>
         </div>
-        <select id="draft-player" [(ngModel)]="draftSelectedPlayerId" [disabled]="draftBusy || draftCandidates.length === 0">
+        <select id="draft-player" [(ngModel)]="draftSelectedPlayerId" (ngModelChange)="chooseRecommendation($event)" [disabled]="draftBusy || !recommendation || draftCandidates.length === 0">
           <option *ngFor="let candidate of draftCandidates" [value]="candidate.player_id">
             {{ candidate.rank | number:'2.0-0' }} · {{ candidate.name }} · {{ candidate.position }} · {{ candidate.school }}
           </option>
         </select>
-        <button class="action primary" (click)="submitDraftPick()" [disabled]="draftBusy || !draftSelectedPlayerId">Make pick</button>
+        <button class="action primary" (click)="submitDraftPick()" [disabled]="draftBusy || !recommendation || !draftSelectedPlayerId">{{ draftSelectionIsOverride ? 'Submit manual override' : 'Make pick' }}</button>
         <p *ngIf="draftCandidates.length === 0" class="draft-empty">No eligible players remain.</p>
       </div>
 

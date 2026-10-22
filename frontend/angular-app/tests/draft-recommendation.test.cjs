@@ -54,7 +54,41 @@ test('recommendation and advisory selection never submit a pick', () => {
   component.submitDraftPick();
   assert.equal(requests[1].url, 'http://localhost:8000/api/drafts/draft-1/picks');
   assert.equal(requests[1].body.player_id, 'b');
+  assert.equal(requests[1].body.reviewed_recommendation_id, 'a');
+  assert.equal(requests[1].body.manual_override, true);
   assert.equal(component.recommendation, null);
+});
+
+test('changed decisions require confirmation without losing explicit override intent', () => {
+  for (const manualOverride of [false, true]) {
+    const { component, requests, suggestion } = setup();
+    component.loadRecommendation();
+    requests[0].next(suggestion);
+    if (manualOverride) component.chooseRecommendation('b');
+    component.submitDraftPick();
+    requests[1].error({
+      status: 409,
+      error: {
+        detail: {
+          code: 'recommendation_changed',
+          manual_override: manualOverride,
+          recommendation: {
+            ...suggestion,
+            recommended: { player_id: 'b' },
+            alternatives: []
+          }
+        }
+      }
+    });
+
+    assert.equal(component.recommendation.recommended.player_id, 'b');
+    assert.equal(component.draftSelectedPlayerId, 'b');
+    assert.equal(component.draftSelectionIsOverride, manualOverride);
+    assert.match(component.recommendationNotice, /decision changed.*confirm/i);
+    component.submitDraftPick();
+    assert.equal(requests[2].body.reviewed_recommendation_id, 'b');
+    assert.equal(requests[2].body.manual_override, manualOverride);
+  }
 });
 
 test('selected players and responses for the wrong pick are rejected', () => {
@@ -79,7 +113,7 @@ test('advancement clears recommendations and ignores late responses', () => {
   assert.equal(component.recommendationLoading, false);
 });
 
-test('failure clears the result, supports retry, and leaves manual picks available', () => {
+test('failure clears the result, supports retry, and blocks picks until an LLM decision loads', () => {
   const { component, requests, suggestion } = setup();
   component.loadRecommendation();
   requests[0].next(suggestion);
@@ -90,7 +124,7 @@ test('failure clears the result, supports retry, and leaves manual picks availab
   assert.equal(component.recommendationError, 'Provider unavailable');
   component.chooseRecommendation('b');
   component.submitDraftPick();
-  assert.equal(requests[2].body.player_id, 'b');
+  assert.equal(requests.length, 2);
 });
 
 test('logout and completed drafts ignore recommendations', () => {
@@ -105,28 +139,41 @@ test('logout and completed drafts ignore recommendations', () => {
   assert.equal(completed.requests.length, 0);
 });
 
-test('unconfigured AI shows an informational notice and leaves manual drafting available', () => {
+test('unconfigured LLM shows a blocking notice and prevents manual picks', () => {
   const { component, requests } = setup();
   component.loadRecommendation();
   requests[0].error({
-    status: 503, error: { detail: { code: 'recommendation_not_configured' } }
+    status: 503, error: { detail: { code: 'llm_required' } }
   });
   assert.equal(component.recommendationLoading, false);
   assert.equal(component.recommendationError, null);
-  assert.match(component.recommendationNotice, /not enabled yet/);
+  assert.match(component.recommendationNotice, /required before any pick/);
   assert.equal(component.draftBusy, false);
   component.chooseRecommendation('b');
   component.submitDraftPick();
-  assert.equal(requests[1].body.player_id, 'b');
-  assert.equal(component.recommendationNotice, null);
+  assert.equal(requests.length, 1);
+  assert.match(component.recommendationNotice, /required/);
+});
+
+test('an LLM decision becomes the default selection and a different selection is an override', () => {
+  const { component, requests, suggestion } = setup();
+  component.loadRecommendation();
+  requests[0].next(suggestion);
+  assert.equal(component.draftSelectedPlayerId, 'a');
+  assert.equal(component.draftSelectionIsOverride, false);
+  component.chooseRecommendation('b');
+  assert.equal(component.draftSelectionIsOverride, true);
 });
 
 test('draft template hides internal pick sources and distinguishes unavailable AI from errors', () => {
   const template = fs.readFileSync(path.join(__dirname, '../src/app/app.component.html'), 'utf8');
   assert.doesNotMatch(template, /pick\.selection_source|draft-pick-source/);
   assert.match(template, /\*ngIf="recommendationNotice" role="status"/);
-  assert.match(template, /\*ngIf="!recommendationNotice" class="text-button"/);
+  assert.match(template, /class="text-button".*loadRecommendation\(\)/);
   assert.match(template, /\*ngIf="recommendationError" class="draft-error" role="alert"/);
+  assert.match(template, /!recommendation \|\| !draftSelectedPlayerId/);
+  assert.match(template, /!recommendation \|\| draftCandidates.length === 0/);
+  assert.match(template, /draftSelectionIsOverride \? 'Submit manual override'/);
 });
 
 test('empty available pool has an explicit state and makes no provider request', () => {
@@ -431,6 +478,7 @@ test('a user pick pauses before the next automatic selection; completion leaves 
   const timer = clock();
   const { component, requests } = setup(timer);
   component.draftSelectedPlayerId = 'a';
+  component.recommendation = { recommended: { player_id: 'a' } };
   component.submitDraftPick();
   requests[0].next(draftState(1));
   timer.tick(1999);

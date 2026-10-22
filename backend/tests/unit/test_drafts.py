@@ -18,8 +18,12 @@ from app.services.draft_repository import DraftRepository
 
 
 @pytest.fixture(autouse=True)
-def isolate_draft_store() -> None:
+def isolate_draft_store(monkeypatch) -> None:
     """Provide an isolated relational database before each test."""
+    from dataclasses import replace
+    from app.services import draft_repository
+
+    monkeypatch.setattr(draft_repository, "settings", replace(draft_repository.settings, llm_api_key="test-key"))
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -65,9 +69,42 @@ def isolate_draft_store() -> None:
         yield session
 
     app.dependency_overrides[get_db] = override_get_db
+    class FakeProvider:
+        provider_name = "test"
+        model_name = "test-model"
+
+        def complete(self, prompt: str, randomness: float) -> dict[str, object]:
+            candidates = json.loads(prompt)["candidates"]
+            return {
+                "selected_player_id": candidates[0]["player_id"],
+                "confidence": 0.8,
+                "alternatives": [],
+                "reasoning_factors": ["Test model selection"],
+                "evidence": ["test fixture"],
+            }
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr("app.api.drafts.OpenAICompatiblePredictionProvider", FakeProvider)
+    monkeypatch.setattr("app.services.draft_repository.OpenAICompatiblePredictionProvider", FakeProvider)
     yield session
     app.dependency_overrides.clear()
     session.close()
+
+
+def reviewed_pick_payload(client, draft_id: str, headers: dict[str, str], team_id: str, player_id: str) -> dict[str, object]:
+    recommendation = client.post(
+        f"/api/drafts/{draft_id}/recommendation", headers=headers,
+    )
+    assert recommendation.status_code == 200
+    recommended_id = recommendation.json()["recommended"]["player_id"]
+    return {
+        "team_id": team_id,
+        "player_id": player_id,
+        "reviewed_recommendation_id": recommended_id,
+        "manual_override": player_id != recommended_id,
+    }
 
 
 def test_controlled_team_flow_auto_simulates_other_teams() -> None:
@@ -92,15 +129,18 @@ def test_controlled_team_flow_auto_simulates_other_teams() -> None:
     state = response.json()
     assert state["current_team_id"] == "team-2"
     assert state["picks"][0]["team_id"] == "team-1"
-    assert state["picks"][0]["selection_source"] == "FALLBACK"
+    assert state["picks"][0]["selection_source"] == "LLM"
 
     response = client.post(
         f"/api/drafts/{draft_id}/picks",
-        json={"team_id": "team-2", "player_id": "player-2"},
+        json=reviewed_pick_payload(client, draft_id, headers, "team-2", "player-2"),
         headers=headers,
     )
     assert response.status_code == 201
-    assert response.json()["picks"][1]["selection_source"] == "USER"
+    controlled_pick = response.json()["picks"][1]
+    assert controlled_pick["selection_source"] in {"LLM", "USER_OVERRIDE"}
+    assert controlled_pick["prediction_metadata"]["llm_selected_player_id"]
+    assert controlled_pick["prediction_metadata"]["selected_player_id"] == "player-2"
 
 
 def test_bounded_simulation_saves_one_pick_per_call_and_stops_for_user():
@@ -143,7 +183,9 @@ def test_single_pick_advancement_completes_round_without_duplicates():
     draft_id = created["draft_run_id"]
     response = client.post(
         f"/api/drafts/{draft_id}/picks", headers=headers,
-        json={"team_id": "team-1", "player_id": created["eligible_players"][0]["player_id"]},
+        json=reviewed_pick_payload(
+            client, draft_id, headers, "team-1", created["eligible_players"][0]["player_id"],
+        ),
     )
     assert response.status_code == 201
     for count in range(2, 33):
@@ -205,7 +247,7 @@ def test_full_first_round_reaches_late_controlled_team_and_completes(isolate_dra
 
     response = client.post(
         f"/api/drafts/{draft_id}/picks",
-        json={"team_id": "team-32", "player_id": available_player},
+        json=reviewed_pick_payload(client, draft_id, headers, "team-32", available_player),
         headers=headers,
     )
 
@@ -357,7 +399,7 @@ def test_prediction_endpoint_requires_configured_llm(isolate_draft_store: Sessio
     assert response.status_code == 503
 
 
-def test_unconfigured_recommendation_is_optional_and_manual_pick_still_works(monkeypatch) -> None:
+def test_unconfigured_recommendation_and_manual_pick_fail_closed(monkeypatch) -> None:
     from app.services.llm_prediction import OpenAICompatiblePredictionProvider
 
     provider = OpenAICompatiblePredictionProvider(api_key="")
@@ -371,17 +413,205 @@ def test_unconfigured_recommendation_is_optional_and_manual_pick_still_works(mon
     draft_id = created["draft_run_id"]
     result = client.post(f"/api/drafts/{draft_id}/recommendation", headers=headers)
     assert result.status_code == 503
-    assert result.json()["detail"]["code"] == "recommendation_not_configured"
-    assert "make your pick" in result.json()["detail"]["message"]
+    assert result.json()["detail"]["code"] == "llm_required"
+    assert "no pick was made" in result.json()["detail"]["message"].lower()
     assert "LLM_API_KEY" not in result.text
     assert provider.client.is_closed
     assert client.get(f"/api/drafts/{draft_id}", headers=headers).json()["picks"] == []
+
+    provider = OpenAICompatiblePredictionProvider(api_key="")
     picked = client.post(
         f"/api/drafts/{draft_id}/picks", headers=headers,
-        json={"team_id": "team-1", "player_id": created["eligible_players"][0]["player_id"]},
+        json={
+            "team_id": "team-1",
+            "player_id": created["eligible_players"][0]["player_id"],
+            "reviewed_recommendation_id": created["eligible_players"][0]["player_id"],
+            "manual_override": False,
+        },
     )
-    assert picked.status_code == 201
-    assert len(picked.json()["picks"]) == 1
+    assert picked.status_code == 503
+    assert picked.json()["detail"]["code"] == "llm_required"
+    assert provider.client.is_closed
+    assert client.get(f"/api/drafts/{draft_id}", headers=headers).json()["picks"] == []
+
+
+def test_controlled_pick_persists_model_decision_and_manual_override() -> None:
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer " + create_access_token("user-1")}
+    created = client.post(
+        "/api/drafts", headers=headers,
+        json={"controlled_team_id": "team-1", "draft_year": 2026},
+    ).json()
+    draft_id = created["draft_run_id"]
+    suggestion = client.post(
+        f"/api/drafts/{draft_id}/recommendation", headers=headers,
+    )
+    assert suggestion.status_code == 200
+    recommended_id = suggestion.json()["recommended"]["player_id"]
+    override_id = next(
+        player["player_id"] for player in created["eligible_players"]
+        if player["player_id"] != recommended_id
+    )
+
+    response = client.post(
+        f"/api/drafts/{draft_id}/picks", headers=headers,
+        json={
+            "team_id": "team-1",
+            "player_id": override_id,
+            "reviewed_recommendation_id": recommended_id,
+            "manual_override": True,
+        },
+    )
+    assert response.status_code == 201
+    pick = response.json()["picks"][0]
+    assert pick["selection_source"] == "USER_OVERRIDE"
+    assert pick["prediction_metadata"]["manual_override"] is True
+    assert pick["prediction_metadata"]["llm_selected_player_id"] == recommended_id
+    assert pick["prediction_metadata"]["selected_player_id"] == override_id
+    assert pick["prediction_metadata"]["provider"] == "test"
+    assert pick["prediction_metadata"]["model"] == "test-model"
+    assert pick["prediction_metadata"]["candidates"]
+
+
+def test_controlled_pick_rejects_different_player_without_manual_override(monkeypatch) -> None:
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer " + create_access_token("user-1")}
+    created = client.post(
+        "/api/drafts", headers=headers,
+        json={"controlled_team_id": "team-1", "draft_year": 2026},
+    ).json()
+    draft_id = created["draft_run_id"]
+    recommended_id, different_id = [player["player_id"] for player in created["eligible_players"][:2]]
+
+    monkeypatch.setattr(
+        DraftRepository,
+        "recommend",
+        lambda _repository, _draft: {"recommended": {"player_id": recommended_id}},
+    )
+    response = client.post(
+        f"/api/drafts/{draft_id}/picks", headers=headers,
+        json={
+            "team_id": "team-1",
+            "player_id": different_id,
+            "reviewed_recommendation_id": recommended_id,
+            "manual_override": False,
+        },
+    )
+
+    assert response.status_code == 409
+    assert "explicit manual override" in response.json()["detail"]
+    assert client.get(f"/api/drafts/{draft_id}", headers=headers).json()["picks"] == []
+
+
+@pytest.mark.parametrize(
+    ("manual_override", "expected_source"),
+    [(False, "LLM"), (True, "USER_OVERRIDE")],
+)
+def test_pick_requires_confirmation_when_reviewed_recommendation_changes(
+    monkeypatch, manual_override: bool, expected_source: str,
+) -> None:
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer " + create_access_token("user-1")}
+    created = client.post(
+        "/api/drafts", headers=headers,
+        json={"controlled_team_id": "team-1", "draft_year": 2026},
+    ).json()
+    draft_id = created["draft_run_id"]
+    first_id, changed_id = [player["player_id"] for player in created["eligible_players"][:2]]
+    selections = iter([first_id, changed_id, changed_id])
+
+    def recommend(_repository, draft):
+        selected_id = next(selections)
+        candidate = {"player_id": selected_id, "name": selected_id}
+        return {
+            "draft_run_id": draft.id,
+            "team_id": draft.controlled_team_id,
+            "pick_number": 1,
+            "recommended": candidate,
+            "alternatives": [],
+            "confidence": 0.8,
+            "reasoning_factors": ["Test model selection"],
+            "evidence": ["test fixture"],
+            "provider": "test",
+            "model": "changing-model",
+            "prompt_version": "test",
+            "randomness": 50,
+            "candidates": [candidate],
+        }
+
+    monkeypatch.setattr(DraftRepository, "recommend", recommend)
+
+    preview = client.post(f"/api/drafts/{draft_id}/recommendation", headers=headers)
+    assert preview.status_code == 200
+    assert preview.json()["recommended"]["player_id"] == first_id
+    selected_id = changed_id if manual_override else first_id
+    changed = client.post(
+        f"/api/drafts/{draft_id}/picks", headers=headers,
+        json={
+            "team_id": "team-1",
+            "player_id": selected_id,
+            "reviewed_recommendation_id": first_id,
+            "manual_override": manual_override,
+        },
+    )
+    assert changed.status_code == 409
+    detail = changed.json()["detail"]
+    assert detail["code"] == "recommendation_changed"
+    assert detail["manual_override"] is manual_override
+    assert detail["recommendation"]["recommended"]["player_id"] == changed_id
+    assert client.get(f"/api/drafts/{draft_id}", headers=headers).json()["picks"] == []
+
+    confirmed = client.post(
+        f"/api/drafts/{draft_id}/picks", headers=headers,
+        json={
+            "team_id": "team-1",
+            "player_id": changed_id,
+            "reviewed_recommendation_id": changed_id,
+            "manual_override": manual_override,
+        },
+    )
+    assert confirmed.status_code == 201
+    pick = confirmed.json()["picks"][0]
+    assert pick["selection_source"] == expected_source
+    assert pick["prediction_metadata"]["manual_override"] is manual_override
+    assert pick["prediction_metadata"]["llm_selected_player_id"] == changed_id
+
+
+def test_auto_simulation_rolls_back_batch_when_llm_fails_mid_batch(monkeypatch) -> None:
+    class FailingSecondPickProvider:
+        provider_name = "test"
+        model_name = "failing-model"
+
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, prompt: str, randomness: float) -> dict[str, object]:
+            self.calls += 1
+            if self.calls == 2:
+                raise RuntimeError("provider unavailable")
+            candidates = json.loads(prompt)["candidates"]
+            return {
+                "selected_player_id": candidates[0]["player_id"],
+                "confidence": 0.8,
+                "alternatives": [],
+            }
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("app.api.drafts.OpenAICompatiblePredictionProvider", FailingSecondPickProvider)
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer " + create_access_token("user-1")}
+    draft_id = client.post(
+        "/api/drafts", headers=headers,
+        json={"controlled_team_id": "team-3", "draft_year": 2026},
+    ).json()["draft_run_id"]
+
+    response = client.post(f"/api/drafts/{draft_id}/auto-simulate", headers=headers)
+
+    assert response.status_code == 503
+    assert "provider unavailable" in response.json()["detail"]
+    assert client.get(f"/api/drafts/{draft_id}", headers=headers).json()["picks"] == []
 
 
 @pytest.mark.parametrize("candidate_id", ["player-1", "missing-player", "wrong-year", "unconfirmed"])
@@ -481,12 +711,17 @@ def test_duplicate_player_selection_is_rejected() -> None:
 
     first = client.post(
         f"/api/drafts/{draft_id}/picks",
-        json={"team_id": "team-1", "player_id": "player-1"},
+        json=reviewed_pick_payload(client, draft_id, headers, "team-1", "player-1"),
         headers=headers,
     )
     duplicate = client.post(
         f"/api/drafts/{draft_id}/picks",
-        json={"team_id": "team-1", "player_id": "player-1"},
+        json={
+            "team_id": "team-1",
+            "player_id": "player-1",
+            "reviewed_recommendation_id": first.json()["picks"][0]["prediction_metadata"]["llm_selected_player_id"],
+            "manual_override": False,
+        },
         headers=headers,
     )
 
