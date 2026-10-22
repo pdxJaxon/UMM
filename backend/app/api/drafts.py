@@ -164,15 +164,15 @@ def recommend_current_pick(
     current_user: UserRecord = Depends(get_current_user),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    """Return an advisory recommendation using only server-side draft evidence."""
+    """Return the current model decision using only server-side draft evidence."""
     provider = OpenAICompatiblePredictionProvider()
     try:
         repository = DraftRepository(session, prediction_provider=provider)
         return repository.recommend(repository.get_owned(draft_id, current_user.id))
     except RecommendationNotConfiguredError as exc:
         raise HTTPException(status_code=503, detail={
-            "code": "recommendation_not_configured",
-            "message": "AI recommendations are not enabled yet. You can still select a prospect and make your pick.",
+            "code": "llm_required",
+            "message": "LLM selection is required. No pick was made; configure or restore the LLM provider and retry.",
         }) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
@@ -193,21 +193,61 @@ def create_pick(
     current_user: UserRecord = Depends(get_current_user),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    """Submit a user pick for the controlled team."""
-    repository = DraftRepository(session)
+    """Require an LLM decision before recording the controlled-team pick or override."""
+    provider = OpenAICompatiblePredictionProvider()
+    repository = DraftRepository(session, prediction_provider=provider)
     try:
         draft = repository.get_owned(draft_id, current_user.id)
         if payload.team_id != draft.controlled_team_id:
             raise ValueError("Only the controlled team can be selected by the user")
-        repository.add_pick(draft, payload.team_id, payload.player_id, "USER")
+        prediction = repository.recommend(draft)
+        recommended_id = str(prediction["recommended"]["player_id"])
+        manual_override = payload.player_id != recommended_id
+        metadata = {
+            "mode": "llm",
+            "provider": prediction["provider"],
+            "model": prediction["model"],
+            "prompt_version": prediction["prompt_version"],
+            "confidence": prediction["confidence"],
+            "randomness": prediction["randomness"],
+            "llm_selected_player_id": recommended_id,
+            "selected_player_id": payload.player_id,
+            "manual_override": manual_override,
+            "alternatives": prediction["alternatives"],
+            "reasoning_factors": prediction["reasoning_factors"],
+            "evidence": prediction["evidence"],
+            "candidates": prediction["candidates"],
+        }
+        repository.add_pick(
+            draft,
+            payload.team_id,
+            payload.player_id,
+            "USER_OVERRIDE" if manual_override else "LLM",
+            float(prediction["randomness"]),
+            metadata,
+        )
         session.commit()
         return repository.state(draft)
+    except RecommendationNotConfiguredError as exc:
+        session.rollback()
+        raise HTTPException(status_code=503, detail={
+            "code": "llm_required",
+            "message": "LLM selection is required. No pick was made; configure or restore the LLM provider and retry.",
+        }) from exc
     except LookupError as exc:
+        session.rollback()
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:
+        session.rollback()
         raise HTTPException(status_code=403, detail=str(exc)) from exc
+    except RuntimeError as exc:
+        session.rollback()
+        raise HTTPException(status_code=503, detail=f"LLM selection failed; no pick was made: {exc}") from exc
     except ValueError as exc:
+        session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        provider.close()
 
 
 @router.post("/{draft_id}/auto-simulate")
@@ -217,18 +257,31 @@ def simulate_draft(
     current_user: UserRecord = Depends(get_current_user),
     session: Session = Depends(get_db),
 ) -> dict[str, object]:
-    """Simulate a bounded number of picks, or until user action is needed."""
-    repository = DraftRepository(session)
+    """Simulate LLM-selected picks, stopping for user action when needed."""
+    provider = OpenAICompatiblePredictionProvider()
+    repository = DraftRepository(session, prediction_provider=provider)
     try:
         draft = repository.get_owned(draft_id, current_user.id)
         repository.auto_simulate(draft, max_picks=max_picks)
         session.commit()
         return repository.state(draft)
+    except RecommendationNotConfiguredError as exc:
+        session.rollback()
+        raise HTTPException(status_code=503, detail={
+            "code": "llm_required",
+            "message": "LLM selection is required. No picks were saved; configure or restore the LLM provider and retry.",
+        }) from exc
     except LookupError as exc:
+        session.rollback()
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     except PermissionError as exc:
+        session.rollback()
         raise HTTPException(status_code=403, detail=str(exc)) from exc
     except RuntimeError as exc:
+        session.rollback()
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except ValueError as exc:
+        session.rollback()
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    finally:
+        provider.close()

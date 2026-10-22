@@ -165,6 +165,8 @@ interface DraftRecommendation {
   evidence: string[];
   provider: string;
   model: string;
+  prompt_version: string;
+  randomness: number;
   rank_basis: string;
 }
 
@@ -333,6 +335,12 @@ export class AppComponent implements OnInit, OnDestroy, AfterViewChecked {
     return !!this.draftState
       && this.draftState.draft_run.status === 'drafting'
       && this.draftState.current_team_id === this.draftState.draft_run.controlled_team_id;
+  }
+
+  protected get draftSelectionIsOverride(): boolean {
+    return !!this.recommendation
+      && !!this.draftSelectedPlayerId
+      && this.draftSelectedPlayerId !== this.recommendation.recommended.player_id;
   }
 
   protected get currentDraftTeamName(): string {
@@ -799,7 +807,8 @@ this.activeEntry = null;
 
   protected submitDraftPick(): void {
     const state = this.draftState;
-    if (!state || !this.draftOnControlledTeam || !this.draftSelectedPlayerId || this.draftBusy) return;
+    if (!state || !this.draftOnControlledTeam || !this.recommendation
+      || !this.draftSelectedPlayerId || this.draftBusy) return;
 
     this.clearRecommendation();
     this.draftBusy = true;
@@ -941,21 +950,22 @@ this.activeEntry = null;
           return;
         }
         this.recommendation = result;
+        this.draftSelectedPlayerId = result.recommended.player_id;
       },
       error: (error: HttpErrorResponse) => {
         if (request !== this.recommendationRequest || authSession !== this.authSession) return;
         this.recommendationLoading = false;
-        if (error.status === 503 && error.error?.detail?.code === 'recommendation_not_configured') {
-          this.recommendationNotice = 'AI recommendations are not enabled yet. You can still select a prospect and make your pick.';
+        if (error.status === 503 && error.error?.detail?.code === 'llm_required') {
+          this.recommendationNotice = 'An LLM decision is required before any pick can be made. Restore provider access and retry.';
           return;
         }
-        this.recommendationError = this.describeApiError(error, 'Unable to load the AI recommendation. You can still choose your own prospect.');
+        this.recommendationError = this.describeApiError(error, 'Unable to load the required LLM decision. Retry before making a pick.');
       }
     });
   }
 
   protected chooseRecommendation(playerId: string): void {
-    if (!this.draftOnControlledTeam || this.draftBusy) return;
+    if (!this.recommendation || !this.draftOnControlledTeam || this.draftBusy) return;
     if (this.draftCandidates.some((candidate) => candidate.player_id === playerId)) {
       this.draftSelectedPlayerId = playerId;
     }

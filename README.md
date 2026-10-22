@@ -77,12 +77,14 @@ draft eligibility.
 
 ## First-round draft recommendations
 
-When your controlled team is on the clock, the draft room requests an advisory
-AI recommendation using the persisted draft pool, default-board/source ordering,
-team needs, and historical team tendencies. Personal board order remains your
-selection preference, not model evidence. Already selected, withdrawn, and
-out-of-pool players cannot be recommended. Responses are bound to the draft,
-team, and current pick and are discarded when that state changes.
+Every new persisted pick requires an LLM decision. Simulated teams use the model's
+validated selection; the controlled team receives the model decision first and
+may explicitly override it with another eligible prospect. The pick record
+stores the model-selected and final player, provider/model/prompt metadata,
+candidate evidence, and whether the user overrode the model. Personal board
+order remains your selection preference, not model evidence. Already selected,
+withdrawn, and out-of-pool players cannot be selected. Recommendations are bound
+to the draft, team, and current pick and are discarded when that state changes.
 
 The selected team's active, nonzero team needs appear above its board title as
 position abbreviations. Automated and AI-recommended picks may prioritize
@@ -90,17 +92,17 @@ positions with a need score of 70 or higher, but only within the round's maximum
 reach distance on the team's default board: 12, 15, 20, 25, 35, 60, and 150
 board slots for rounds one through seven, respectively. The current draft
 simulator covers round one; reach limits are configured per round for
-later-round support. Manual picks remain under the user's control.
+later-round support. Controlled-team picks may override the LLM selection only after the server has
+obtained and validated an LLM decision.
 
 Configure `LLM_API_KEY` in the backend environment to enable the existing
 OpenAI-compatible provider; `LLM_API_URL` and `LLM_MODEL` select the service/model.
-Without a configured key, the draft room shows an informational notice that AI
-recommendations are not enabled, rather than an error or a nonfunctional retry.
-Manual drafting remains available; no substitute AI recommendation is generated.
-Provider failure is shown explicitly with a recommendation retry action, not
-silently replaced by another engine. Manual selection remains available.
-Selecting the recommendation or an alternative only fills the pick selector:
-**Make pick** is the separate confirmation that saves a selection.
+If the provider is missing or fails, the pick request fails and no picks from
+that simulation batch are saved. The draft room blocks controlled-team picks
+until an LLM decision is available and provides a retry action. The LLM decision
+is the default selection; choosing another eligible player is an explicit
+manual override. The server obtains a fresh LLM decision when the pick is
+submitted and records that decision alongside the final selection.
 
 The displayed rank is the available pool's UMM default-board order followed by
 pinned source order, not a personalized-board rank. Source consensus rank is
@@ -141,13 +143,14 @@ Browser smoke check (use test accounts and an isolated database):
 1. Sign in, load a team board, set randomness, and start a mock draft.
 2. Confirm the draft advances to your team; team/board/randomness controls are
    locked. Verify the recommendation's name, rank, explanation, and alternatives.
-3. Choose an alternative, then another player in the selector. Neither action
-   should change the pick log. Press **Make pick** to persist that selection.
+3. Confirm the LLM choice is preselected. Choose an alternative or another
+   eligible player to mark a manual override, then submit the displayed pick
+   or override.
 4. Confirm other teams advance, 32 distinct picks appear in the recap, and the
    recommendation disappears. Close the completed draft explicitly.
 5. Repeat with an early and late controlled team. With the provider unavailable,
-   confirm an explicit error and retry appear while manual picks still work.
-6. Delay a recommendation response, then submit a manual pick or sign out.
+   confirm an explicit error and retry appear and that no pick can be submitted.
+6. Delay a recommendation response, then sign out or advance to another pick.
    Confirm the late result cannot reappear for the old pick/session.
 
 The UI browser check can mock draft/provider responses to avoid paid model calls
