@@ -308,8 +308,22 @@ def test_full_round_api_uses_approved_projected_players_and_rejects_duplicates(s
             assert state["picks"][0]["player_id"] == players[0]["player_id"]
             assert state["current_team_id"] == "team-32"
             assert state["draft_run"]["prospect_snapshot_id"] == report["snapshot_id"]
+
+            def reviewed_payload(player_id: str) -> dict[str, object]:
+                recommendation = client.post(
+                    f"/api/drafts/{draft_id}/recommendation", headers=headers,
+                )
+                assert recommendation.status_code == 200
+                recommended_id = recommendation.json()["recommended"]["player_id"]
+                return {
+                    "team_id": "team-32",
+                    "player_id": player_id,
+                    "reviewed_recommendation_id": recommended_id,
+                    "manual_override": player_id != recommended_id,
+                }
+
             duplicate = client.post(f"/api/drafts/{draft_id}/picks", json={
-                "team_id": "team-32", "player_id": state["picks"][0]["player_id"],
+                **reviewed_payload(state["picks"][0]["player_id"]),
             }, headers=headers)
             assert duplicate.status_code == 409
             rejected = client.post(f"/api/drafts/{draft_id}/prediction", json={
@@ -319,7 +333,7 @@ def test_full_round_api_uses_approved_projected_players_and_rejects_duplicates(s
             picked = {pick["player_id"] for pick in state["picks"]}
             available = next(player["player_id"] for player in players if player["player_id"] not in picked)
             completed = client.post(f"/api/drafts/{draft_id}/picks", json={
-                "team_id": "team-32", "player_id": available,
+                **reviewed_payload(available),
             }, headers=headers)
             assert completed.status_code == 201, completed.text
             result = completed.json()

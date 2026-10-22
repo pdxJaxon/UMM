@@ -34,6 +34,8 @@ class SubmitPickRequest(BaseModel):
 
     player_id: str
     team_id: str
+    reviewed_recommendation_id: str
+    manual_override: bool
 
 
 class PredictPickRequest(BaseModel):
@@ -202,7 +204,14 @@ def create_pick(
             raise ValueError("Only the controlled team can be selected by the user")
         prediction = repository.recommend(draft)
         recommended_id = str(prediction["recommended"]["player_id"])
-        manual_override = payload.player_id != recommended_id
+        if recommended_id != payload.reviewed_recommendation_id:
+            raise HTTPException(status_code=409, detail={
+                "code": "recommendation_changed",
+                "message": "The LLM decision changed. Review the updated decision and confirm your pick.",
+                "recommendation": prediction,
+                "manual_override": payload.manual_override,
+            })
+        manual_override = payload.manual_override
         metadata = {
             "mode": "llm",
             "provider": prediction["provider"],
