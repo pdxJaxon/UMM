@@ -403,6 +403,16 @@ def test_unconfigured_recommendation_and_manual_pick_fail_closed(monkeypatch) ->
     assert provider.client.is_closed
     assert client.get(f"/api/drafts/{draft_id}", headers=headers).json()["picks"] == []
 
+    provider = OpenAICompatiblePredictionProvider(api_key="")
+    picked = client.post(
+        f"/api/drafts/{draft_id}/picks", headers=headers,
+        json={"team_id": "team-1", "player_id": created["eligible_players"][0]["player_id"]},
+    )
+    assert picked.status_code == 503
+    assert picked.json()["detail"]["code"] == "llm_required"
+    assert provider.client.is_closed
+    assert client.get(f"/api/drafts/{draft_id}", headers=headers).json()["picks"] == []
+
 
 def test_controlled_pick_persists_model_decision_and_manual_override() -> None:
     client = TestClient(app)
