@@ -1,6 +1,12 @@
 """Main FastAPI application module."""
 
-from fastapi import FastAPI
+import truststore
+
+# Trust the OS certificate store so outbound HTTPS (e.g. the LLM provider) works behind
+# TLS-inspecting corporate proxies whose root CA is not in certifi's bundle.
+truststore.inject_into_ssl()
+
+from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
