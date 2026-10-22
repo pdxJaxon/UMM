@@ -473,6 +473,36 @@ def test_controlled_pick_persists_model_decision_and_manual_override() -> None:
     assert pick["prediction_metadata"]["candidates"]
 
 
+def test_controlled_pick_rejects_different_player_without_manual_override(monkeypatch) -> None:
+    client = TestClient(app)
+    headers = {"Authorization": "Bearer " + create_access_token("user-1")}
+    created = client.post(
+        "/api/drafts", headers=headers,
+        json={"controlled_team_id": "team-1", "draft_year": 2026},
+    ).json()
+    draft_id = created["draft_run_id"]
+    recommended_id, different_id = [player["player_id"] for player in created["eligible_players"][:2]]
+
+    monkeypatch.setattr(
+        DraftRepository,
+        "recommend",
+        lambda _repository, _draft: {"recommended": {"player_id": recommended_id}},
+    )
+    response = client.post(
+        f"/api/drafts/{draft_id}/picks", headers=headers,
+        json={
+            "team_id": "team-1",
+            "player_id": different_id,
+            "reviewed_recommendation_id": recommended_id,
+            "manual_override": False,
+        },
+    )
+
+    assert response.status_code == 409
+    assert "explicit manual override" in response.json()["detail"]
+    assert client.get(f"/api/drafts/{draft_id}", headers=headers).json()["picks"] == []
+
+
 @pytest.mark.parametrize(
     ("manual_override", "expected_source"),
     [(False, "LLM"), (True, "USER_OVERRIDE")],
