@@ -212,6 +212,8 @@ def create_pick(
                 "manual_override": payload.manual_override,
             })
         manual_override = payload.manual_override
+        if not manual_override and payload.player_id != recommended_id:
+            raise ValueError("Selecting a different player requires an explicit manual override")
         metadata = {
             "mode": "llm",
             "provider": prediction["provider"],
