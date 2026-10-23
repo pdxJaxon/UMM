@@ -1,0 +1,3 @@
+ui: gunicorn flask_app:app --bind 0.0.0.0:$PORT 
+api: uvicorn fastapi_app:app --host 127.0.0.1 --port 8000
+
