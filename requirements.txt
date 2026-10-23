@@ -14,6 +14,6 @@ beautifulsoup4==4.12.3
 nflreadpy==0.1.5
 playwright==1.64.0
 Flask==3.0.3
-honcho==2.0.1
+honcho==2.0.0
 requests==2.32.4
 httpx==0.27.0
